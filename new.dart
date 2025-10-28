@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../../../models/budget.dart';
-import '../../../../models/expense.dart';
-import '../../../../services/service_locator.dart';
-import '../../../../services/auth_service.dart';
-import '../../../auth/login_screen.dart';
+import 'package:aplicacion1/models/budget.dart';
+import 'package:aplicacion1/models/expense.dart';
+import 'package:aplicacion1/services/service_locator.dart';
+import 'package:aplicacion1/services/auth_service.dart';
+import 'package:aplicacion1/screens/auth/inicio_sesion_screen.dart';
 
 class DashboardTab extends StatelessWidget {
   final ValueChanged<int>? onChangeTab;
@@ -480,6 +480,14 @@ class _ProfileScreenState extends State<_ProfileScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _userCtrl.dispose();
+    _emailCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final username = await AuthService.getLastUsername();
     if (username != null) {
@@ -509,11 +517,79 @@ class _ProfileScreenState extends State<_ProfileScreen> {
           const SnackBar(content: Text('Perfil actualizado')));
       Navigator.of(context).pop();
     } on Exception catch (e) {
-      final msg = e.toString().contains('ya existe')
+      final String msg = e.toString().contains('ya existe')
           ? 'El nombre de usuario ya existe'
-          : 'No se pudo a';
+          : 'Error al actualizar el perfil';
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
-// ... el resto de la clase _ProfileScreenState
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Perfil'),
+        actions: [
+          if (!_saving)
+            TextButton(
+              onPressed: _save,
+              child: const Text('Guardar', style: TextStyle(color: Colors.white)),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: CircularProgressIndicator(),
+            ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nombre'),
+                validator: (value) =>
+                    value?.isEmpty ?? true ? 'Ingrese un nombre' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _userCtrl,
+                decoration: const InputDecoration(labelText: 'Usuario'),
+                validator: (value) =>
+                    value?.isEmpty ?? true ? 'Ingrese un usuario' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _emailCtrl,
+                decoration: const InputDecoration(labelText: 'Correo electrónico'),
+                keyboardType: TextInputType.emailAddress,
+                validator: (value) =>
+                    value?.isEmpty ?? true ? 'Ingrese un correo válido' : null,
+              ),
+              const SizedBox(height: 24),
+              if (_saving) const LinearProgressIndicator(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
