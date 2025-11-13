@@ -3,7 +3,6 @@ import 'package:aplicacion1/models/budget.dart';
 import 'package:aplicacion1/models/expense.dart';
 import 'package:aplicacion1/services/service_locator.dart';
 import 'package:aplicacion1/services/auth_service.dart';
-import 'package:aplicacion1/screens/auth/inicio_sesion_screen.dart';
 
 class DashboardTab extends StatelessWidget {
   final ValueChanged<int>? onChangeTab;
@@ -103,7 +102,6 @@ class _BudgetProgressCard extends StatefulWidget {
 class _BudgetProgressCardState extends State<_BudgetProgressCard>
     with SingleTickerProviderStateMixin {
   BudgetConfig? _config;
-  Map<String, BudgetCategory> _cats = {};
 
   @override
   void initState() {
@@ -113,11 +111,10 @@ class _BudgetProgressCardState extends State<_BudgetProgressCard>
 
   Future<void> _load() async {
     final cfg = await budgetStore.loadConfig();
-    final cats = await budgetStore.loadTransferCategories();
+    await budgetStore.loadTransferCategories(); // Load but don't store since we don't use it
     if (!mounted) return;
     setState(() {
       _config = cfg;
-      _cats = cats;
     });
   }
 

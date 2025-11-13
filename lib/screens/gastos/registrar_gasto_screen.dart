@@ -5,19 +5,26 @@ import '../../services/service_locator.dart';
 
 class RegistrarGastoScreen extends StatefulWidget {
   static const String routeName = '/registrar-gasto';
+  final ExpenseCategory? initialCategory;
 
-  const RegistrarGastoScreen({super.key});
+  const RegistrarGastoScreen({super.key, this.initialCategory});
 
   @override
   State<RegistrarGastoScreen> createState() => _RegistrarGastoScreenState();
 }
 
 class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _categoria = widget.initialCategory ?? ExpenseCategory.academica;
+  }
+
   final _formKey = GlobalKey<FormState>();
   final _descripcionCtrl = TextEditingController();
   final _montoCtrl = TextEditingController();
   DateTime _fecha = DateTime.now();
-  ExpenseCategory _categoria = ExpenseCategory.academica;
+  late ExpenseCategory _categoria;
 
   @override
   void dispose() {
@@ -113,6 +120,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
                         DropdownMenuItem(value: ExpenseCategory.academica, child: Text('Académica')),
                         DropdownMenuItem(value: ExpenseCategory.transporte, child: Text('Transporte')),
                         DropdownMenuItem(value: ExpenseCategory.alojamiento, child: Text('Alojamiento')),
+                        DropdownMenuItem(value: ExpenseCategory.comida, child: Text('Comida')),
                         DropdownMenuItem(value: ExpenseCategory.otros, child: Text('Otras adicionales')),
                       ],
                       onChanged: (v) => setState(() => _categoria = v ?? ExpenseCategory.academica),

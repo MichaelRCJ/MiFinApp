@@ -1,5 +1,11 @@
 
-enum ExpenseCategory { academica, transporte, alojamiento, otros }
+enum ExpenseCategory { 
+  academica, 
+  transporte, 
+  alojamiento, 
+  comida,  // Añadida para coincidir con el presupuesto
+  otros 
+}
 
 class Expense {
   final String id;
@@ -7,6 +13,7 @@ class Expense {
   final double monto;
   final DateTime fecha;
   final ExpenseCategory categoria;
+  final bool esPresupuestado;
 
   const Expense({
     required this.id,
@@ -14,6 +21,7 @@ class Expense {
     required this.monto,
     required this.fecha,
     required this.categoria,
+    this.esPresupuestado = false,
   });
 
   Expense copyWith({
@@ -22,12 +30,14 @@ class Expense {
     double? monto,
     DateTime? fecha,
     ExpenseCategory? categoria,
+    bool? esPresupuestado,
   }) => Expense(
         id: id ?? this.id,
         descripcion: descripcion ?? this.descripcion,
         monto: monto ?? this.monto,
         fecha: fecha ?? this.fecha,
         categoria: categoria ?? this.categoria,
+        esPresupuestado: esPresupuestado ?? this.esPresupuestado,
       );
 
   Map<String, dynamic> toJson() => {
@@ -36,6 +46,7 @@ class Expense {
         'monto': monto,
         'fecha': fecha.toIso8601String(),
         'categoria': categoria.name,
+        'esPresupuestado': esPresupuestado,
       };
 
   static Expense fromJson(Map<String, dynamic> json) => Expense(
@@ -44,5 +55,6 @@ class Expense {
         monto: (json['monto'] as num).toDouble(),
         fecha: DateTime.parse(json['fecha'] as String),
         categoria: ExpenseCategory.values.firstWhere((e) => e.name == json['categoria']),
+        esPresupuestado: json['esPresupuestado'] as bool? ?? false,
       );
 }

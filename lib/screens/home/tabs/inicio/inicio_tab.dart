@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../../models/budget.dart';
 import '../../../../models/expense.dart';
 import '../../../../services/service_locator.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../storage/expense_store.dart';
 import '../../../auth/inicio_sesion_screen.dart';
 
 class DashboardTab extends StatelessWidget {
@@ -82,21 +84,43 @@ class _BudgetProgressCard extends StatefulWidget {
 
 class _BudgetProgressCardState extends State<_BudgetProgressCard> {
   BudgetConfig? _config;
-  Map<String, BudgetCategory> _cats = {};
+  late final VoidCallback _onBudgetChanged;
+  late final VoidCallback _onExpensesChanged;
 
   @override
   void initState() {
     super.initState();
+    
+    // Inicializar los callbacks
+    _onBudgetChanged = () {
+      if (mounted) _load();
+    };
+    
+    _onExpensesChanged = () {
+      if (mounted) _load();
+    };
+    
     _load();
+    
+    // Registrar listeners
+    budgetStore.addListener(_onBudgetChanged);
+    expenseNotifier.addListener(_onExpensesChanged);
+  }
+
+  @override
+  void dispose() {
+    // Remover listeners
+    budgetStore.removeListener(_onBudgetChanged);
+    expenseNotifier.removeListener(_onExpensesChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
     final cfg = await budgetStore.loadConfig();
-    final cats = await budgetStore.loadTransferCategories();
+    await budgetStore.loadTransferCategories();
     if (!mounted) return;
     setState(() {
       _config = cfg;
-      _cats = cats;
     });
   }
 
@@ -228,6 +252,8 @@ class _HistoryListState extends State<_HistoryList> {
         return 'Transporte';
       case ExpenseCategory.alojamiento:
         return 'Alojamiento';
+      case ExpenseCategory.comida:
+        return 'Comida';
       case ExpenseCategory.otros:
         return 'Otras adicionales';
     }
@@ -279,6 +305,9 @@ class _MonthlySpendCardState extends State<_MonthlySpendCard> {
   double _initial = 0;
   double _spent = 0;
   bool _loading = true;
+  BudgetConfig? _config;
+  late VoidCallback _onExpensesChanged;
+  late VoidCallback _onBudgetChanged;
 
   @override
   void initState() {
@@ -287,15 +316,44 @@ class _MonthlySpendCardState extends State<_MonthlySpendCard> {
   }
 
   Future<void> _load() async {
-    final cfg = await budgetStore.loadConfig();
-    final expenses = await expenseStore.loadExpenses();
-    final sumSpent = expenses.fold<double>(0, (p, e) => p + e.monto);
     if (!mounted) return;
+    
     setState(() {
-      _initial = cfg?.monthlyDeposit ?? 0;
-      _spent = sumSpent;
-      _loading = false;
+      _loading = true;
     });
+    
+    try {
+      final cfg = await budgetStore.loadConfig();
+      final expenses = await expenseStore.loadExpenses();
+      final now = DateTime.now();
+      final currentMonth = DateTime(now.year, now.month);
+      
+      // Filtrar gastos del mes actual
+      final monthlyExpenses = expenses.where(
+        (e) => e.fecha.isAfter(currentMonth.subtract(const Duration(days: 1)))
+      ).toList();
+      
+      final sumSpent = monthlyExpenses.fold<double>(0, (p, e) => p + e.monto);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _config = cfg;
+        _initial = cfg?.monthlyDeposit ?? 0;
+        _spent = sumSpent;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+        // Opcional: Mostrar un mensaje de error al usuario
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al cargar el presupuesto'))
+        );
+      }
+    }
   }
 
   @override
@@ -303,62 +361,166 @@ class _MonthlySpendCardState extends State<_MonthlySpendCard> {
     if (_loading) {
       return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
     }
-    final remaining = (_initial - _spent).clamp(0, double.infinity);
-    final ratio = _initial <= 0 ? 0.0 : (_spent / _initial).clamp(0.0, 1.0);
+    
+    // Calcular total asignado a categorías
+    final totalAsignado = _config == null 
+        ? 0 
+        : _config!.allocationsAmount.values.fold<double>(0, (sum, amount) => sum + (amount ?? 0));
+    final restante = _initial - totalAsignado;
+    final ratio = _initial <= 0 ? 0.0 : (totalAsignado / _initial).clamp(0.0, 1.0);
+    
     return _SectionCard(
-      title: 'Gasto mensual',
+      title: 'Presupuesto del mes',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Dinero inicial', style: TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Text(_fmt(_initial), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                  ],
+          // Sección de presupuesto total
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  'Presupuesto Total',
+                  style: TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.w600),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Text(
+                  '\$${_initial.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Colors.blue),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Sección de asignación de presupuesto
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
               Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Gastos', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Total Asignado',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(_fmt(_spent), style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w700)),
+                  Text(
+                    '\$${totalAsignado.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(width: 16),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('Sobrante', style: TextStyle(color: Colors.deepOrange.shade700, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Restante por asignar',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(_fmt(remaining), style: TextStyle(color: Colors.deepOrange.shade700, fontWeight: FontWeight.w700)),
+                  Text(
+                    '\$${restante.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: restante >= 0 ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          
+          const SizedBox(height: 16),
+          
+          // Sección de gastos reales
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Gastos Reales',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Gastados:', style: TextStyle(fontSize: 14)),
+                    Text(
+                      '\$${_spent.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          const SizedBox(height: 16),
+          // Barra de progreso
           _bar(ratio),
-          const SizedBox(height: 6),
-          _bar((ratio * .8).clamp(0.0, 1.0)),
-          const SizedBox(height: 6),
-          _bar((ratio * 1.1).clamp(0.0, 1.0)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Asignado: \$${totalAsignado.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                '${(ratio * 100).toStringAsFixed(0)}% del presupuesto',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  String _fmt(num v) {
-    // Simple formatting without intl
-    if (v >= 1000) {
-      return v.toStringAsFixed(0);
-    }
-    return v.toStringAsFixed(0);
-  }
 
   Widget _bar(double ratio) {
     final int spentFlex = (ratio * 100).round().clamp(0, 100);

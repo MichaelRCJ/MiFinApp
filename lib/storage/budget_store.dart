@@ -1,11 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/budget.dart';
 import '../services/auth_service.dart';
 
-class BudgetStore {
+class BudgetStore extends ChangeNotifier {
   static const String _legacyConfigKey = 'budget_config_v1';
   static const String _legacyTransferCatsKey = 'transfer_categories_v1';
   static const String _fallbackUser = 'guest';
@@ -23,6 +24,7 @@ class BudgetStore {
       'allocationsAmount': config.allocationsAmount.map((k, v) => MapEntry(k.name, v)),
     };
     await prefs.setString(key, jsonEncode(data));
+    notifyListeners();
   }
 
   Future<BudgetConfig?> loadConfig() async {
@@ -86,6 +88,7 @@ class BudgetStore {
     final map = raw != null ? (jsonDecode(raw) as Map<String, dynamic>) : <String, dynamic>{};
     map[transferId] = category.name;
     await prefs.setString(key, jsonEncode(map));
+    notifyListeners();
   }
 
   Future<Map<String, BudgetCategory>> loadTransferCategories() async {

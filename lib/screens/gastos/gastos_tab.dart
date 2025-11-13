@@ -44,12 +44,25 @@ class _ExpensesTabState extends State<ExpensesTab> {
         return 'Transporte';
       case ExpenseCategory.alojamiento:
         return 'Alojamiento';
+      case ExpenseCategory.comida:
+        return 'Comida';
       case ExpenseCategory.otros:
         return 'Otras adicionales';
     }
   }
 
   String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  // Obtener el ícono para cada categoría
+  IconData _getCategoryIcon(ExpenseCategory category) {
+    return switch (category) {
+      ExpenseCategory.alojamiento => Icons.house_outlined,
+      ExpenseCategory.academica => Icons.school_outlined,
+      ExpenseCategory.transporte => Icons.directions_bus_outlined,
+      ExpenseCategory.comida => Icons.restaurant_outlined,
+      ExpenseCategory.otros => Icons.more_horiz,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,14 +86,73 @@ class _ExpensesTabState extends State<ExpensesTab> {
                     padding: const EdgeInsets.all(16),
                     itemBuilder: (_, i) {
                       final e = _items[i];
-                      return ListTile(
-                        leading: const CircleAvatar(child: Icon(Icons.payments_outlined)),
-                        title: Text(e.descripcion.isEmpty ? 'Gasto' : e.descripcion),
-                        subtitle: Text('${_categoryLabel(e.categoria)} • ${_fmtDate(e.fecha)}'),
-                        trailing: Text(e.monto.toStringAsFixed(2)),
+                      return Card(
+                        elevation: 1,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: e.esPresupuestado 
+                              ? BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.5), width: 1)
+                              : BorderSide.none,
+                        ),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: e.esPresupuestado 
+                                ? Theme.of(context).colorScheme.primary.withOpacity(0.1)
+                                : Theme.of(context).colorScheme.surfaceVariant,
+                            child: Icon(
+                              _getCategoryIcon(e.categoria),
+                              color: e.esPresupuestado 
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          title: Text(
+                            e.descripcion.isEmpty ? 'Gasto' : e.descripcion,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: e.esPresupuestado 
+                                  ? Theme.of(context).colorScheme.primary
+                                  : null,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${_categoryLabel(e.categoria)} • ${_fmtDate(e.fecha)}'),
+                              if (e.esPresupuestado) ...[
+                                const SizedBox(height: 2),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    'Presupuestado',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Theme.of(context).colorScheme.primary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          trailing: Text(
+                            '\$${e.monto.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: e.esPresupuestado 
+                                  ? Theme.of(context).colorScheme.primary
+                                  : null,
+                            ),
+                          ),
+                        ),
                       );
                     },
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemCount: _items.length,
                   )),
         bottomNavigationBar: const SizedBox(height: 0),

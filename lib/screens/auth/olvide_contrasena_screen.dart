@@ -16,6 +16,7 @@ class _OlvideContrasenaScreenState extends State<OlvideContrasenaScreen> {
   final _surnameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   bool _loading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -28,7 +29,10 @@ class _OlvideContrasenaScreenState extends State<OlvideContrasenaScreen> {
   Future<void> _onSendTemp() async {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
     try {
       final name = _nameCtrl.text.trim();
       final surname = _surnameCtrl.text.trim();
@@ -40,9 +44,9 @@ class _OlvideContrasenaScreenState extends State<OlvideContrasenaScreen> {
         durationMinutes: 10,
       );
       if (result == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('La información no coincide con ningún usuario. Por favor verifique nombre, apellidos y correo.')),
-        );
+        setState(() {
+          _errorMessage = 'La información no coincide con ningún usuario. Por favor verifique nombre, apellidos y correo.';
+        });
         return;
       }
       try {
@@ -75,9 +79,9 @@ class _OlvideContrasenaScreenState extends State<OlvideContrasenaScreen> {
       );
       Navigator.of(context).pop();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo generar la contraseña temporal')),
-      );
+      setState(() {
+        _errorMessage = 'No se pudo generar la contraseña temporal';
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -161,6 +165,14 @@ class _OlvideContrasenaScreenState extends State<OlvideContrasenaScreen> {
                     return null;
                   },
                 ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,

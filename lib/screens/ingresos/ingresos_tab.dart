@@ -1,7 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../models/budget.dart';
 import '../../models/expense.dart';
 import '../../services/service_locator.dart';
+import '../../services/auth_service.dart';
 
 class IncomeTab extends StatefulWidget {
   const IncomeTab({super.key});
@@ -10,37 +17,156 @@ class IncomeTab extends StatefulWidget {
   State<IncomeTab> createState() => _IncomeTabState();
 }
 
+class IncomeRecord {
+  final String id;
+  final String description;
+  final double amount;
+  final DateTime date;
+
+  IncomeRecord({
+    required this.id,
+    required this.description,
+    required this.amount,
+    required this.date,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'description': description,
+    'amount': amount,
+    'date': date.toIso8601String(),
+  };
+
+  factory IncomeRecord.fromJson(Map<String, dynamic> json) => IncomeRecord(
+    id: json['id'] as String,
+    description: json['description'] as String,
+    amount: (json['amount'] as num).toDouble(),
+    date: DateTime.parse(json['date'] as String),
+  );
+}
+
 class _IncomeTabState extends State<IncomeTab> {
-  BudgetConfig? _config;
-  List<Expense> _monthExpenses = const [];
+  double _totalIncome = 0;
+  List<IncomeRecord> _incomes = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final cfg = await budgetStore.loadConfig();
-    final all = await expenseStore.loadExpenses();
-    final now = DateTime.now();
-    final month = all.where((e) => e.fecha.year == now.year && e.fecha.month == now.month).toList();
-    month.sort((a, b) => b.fecha.compareTo(a.fecha));
-    if (!mounted) return;
-    setState(() {
-      _config = cfg;
-      _monthExpenses = month;
-      _loading = false;
+    // Inicializar el formato de fechas para el idioma español
+    initializeDateFormatting('es').then((_) {
+      if (mounted) {
+        _load();
+      }
     });
   }
 
-  double get _initial => _config?.monthlyDeposit ?? 0;
-  double get _spent => _monthExpenses.fold(0, (p, e) => p + e.monto);
-  double get _remaining => (_initial - _spent).clamp(0, double.infinity);
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final username = await AuthService.getLastUsername() ?? 'default';
+      final incomesKey = 'incomes_$username';
+      
+      final incomesJson = prefs.getStringList(incomesKey) ?? [];
+      final loadedIncomes = incomesJson
+          .map((json) => IncomeRecord.fromJson(jsonDecode(json)))
+          .toList();
+      
+      // Ordenar por fecha más reciente primero
+      loadedIncomes.sort((a, b) => b.date.compareTo(a.date));
+      
+      if (mounted) {
+        setState(() {
+          _incomes = loadedIncomes;
+          _totalIncome = _incomes.fold(0, (sum, income) => sum + income.amount);
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      debugPrint('Error loading incomes: $e');
+    }
+  }
 
-  String _fmt(num v) => v.toStringAsFixed(0);
-  String _fmtDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  double get _totalSpent => 0; // No mostramos gastos en esta pantalla
+  double get _remaining => _totalIncome; // Mostramos el total de ingresos como disponible
+
+  String _fmt(num v) => '\$${v.toStringAsFixed(2).replaceAllMapped(
+        RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]},',
+      )}';
+      
+  Widget _buildInfoRow(String label, String value, IconData icon, Color color, {bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildIncomeItem(IncomeRecord income) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: CircleAvatar(
+          backgroundColor: Colors.green[50],
+          child: Icon(Icons.arrow_downward, color: Colors.green[700]),
+        ),
+        title: Text(
+          income.description.isEmpty ? 'Ingreso' : income.description,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Text(
+          _fmtDate(income.date),
+          style: TextStyle(color: Colors.grey[600]),
+        ),
+        trailing: Text(
+          _fmt(income.amount),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.green,
+          ),
+        ),
+      ),
+    );
+  }
+  String _fmtDate(DateTime d) {
+    try {
+      return DateFormat('dd MMM yyyy', 'es').format(d);
+    } catch (e) {
+      // En caso de error, devolver un formato simple
+      return '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
+    }
+  }
   String _categoryLabel(ExpenseCategory c) {
     switch (c) {
       case ExpenseCategory.academica:
@@ -49,9 +175,182 @@ class _IncomeTabState extends State<IncomeTab> {
         return 'Transporte';
       case ExpenseCategory.alojamiento:
         return 'Alojamiento';
+      case ExpenseCategory.comida:
+        return 'Comida';
       case ExpenseCategory.otros:
         return 'Otras adicionales';
     }
+  }
+
+  Future<bool> _saveNewIncome(IncomeRecord newIncome) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final username = await AuthService.getLastUsername() ?? 'default';
+      final incomesKey = 'incomes_$username';
+      
+      // Obtener ingresos existentes
+      final incomesJson = prefs.getStringList(incomesKey) ?? [];
+      final incomes = incomesJson
+          .map((json) => IncomeRecord.fromJson(jsonDecode(json)))
+          .toList();
+      
+      // Agregar nuevo ingreso
+      incomes.add(newIncome);
+      
+      // Guardar de vuelta
+      await prefs.setStringList(
+        incomesKey,
+        incomes.map((income) => jsonEncode(income.toJson())).toList(),
+      );
+      
+      // Actualizar UI
+      if (mounted) {
+        setState(() {
+          _incomes.insert(0, newIncome); // Agregar al inicio de la lista
+          _totalIncome += newIncome.amount;
+        });
+      }
+      
+      return true;
+    } catch (e) {
+      debugPrint('Error saving income: $e');
+      return false;
+    }
+  }
+
+  Future<void> _showAddIncomeDialog() async {
+    final amountController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    DateTime selectedDate = DateTime.now();
+    
+    return showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Agregar Ingreso', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: const InputDecoration(
+                      labelText: 'Descripción',
+                      hintText: 'Ej: Pago de nómina',
+                      prefixIcon: Icon(Icons.description),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Ingrese una descripción';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: amountController,
+                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Monto',
+                      hintText: '0.00',
+                      prefixText: '\$ ',
+                      prefixIcon: Icon(Icons.attach_money),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Ingrese un monto';
+                      }
+                      final amount = double.tryParse(value);
+                      if (amount == null || amount <= 0) {
+                        return 'Ingrese un monto válido';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.calendar_today, color: Colors.blue),
+                    title: const Text('Fecha del ingreso'),
+                    subtitle: Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+                    trailing: const Icon(Icons.arrow_drop_down),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2030),
+                      );
+                      if (date != null) {
+                        setState(() => selectedDate = date);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('CANCELAR'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                if (formKey.currentState!.validate()) {
+                  final amount = double.parse(amountController.text);
+                  final description = descriptionController.text.trim();
+                  
+                  // Crear nuevo ingreso
+                  final newIncome = IncomeRecord(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    description: description,
+                    amount: amount,
+                    date: selectedDate,
+                  );
+                  
+                  // Guardar el ingreso
+                  final success = await _saveNewIncome(newIncome);
+                  
+                  if (mounted) {
+                    Navigator.pop(context);
+                    
+                    if (success) {
+                      // Mostrar notificación de éxito
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('¡Ingreso de \$${amount.toStringAsFixed(2)} registrado!'),
+                          backgroundColor: Colors.green,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      );
+                    } else {
+                      // Mostrar mensaje de error
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Error al guardar el ingreso'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                }
+              },
+              child: const Text('GUARDAR INGRESO'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -59,65 +358,107 @@ class _IncomeTabState extends State<IncomeTab> {
     return SafeArea(
       child: Scaffold(
         appBar: AppBar(title: const Text('Ingresos')),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _showAddIncomeDialog,
+          child: const Icon(Icons.add),
+        ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: ListView(
                   children: [
+                    // Tarjeta de resumen de ingresos
                     Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: Padding(
-                        padding: const EdgeInsets.all(16.0),
+                        padding: const EdgeInsets.all(20.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Información financiera mensual', style: TextStyle(fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 12),
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Dinero inicial'),
-                                      Text(_fmt(_initial), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                                    ],
+                                Text(
+                                  'Resumen de Ingresos',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).primaryColor,
                                   ),
                                 ),
-                                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                  Text('Gastos', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w700)),
-                                  Text(_fmt(_spent), style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w700)),
-                                ]),
-                                const SizedBox(width: 16),
-                                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                  Text('Sobrante', style: TextStyle(color: Colors.deepOrange.shade700, fontWeight: FontWeight.w700)),
-                                  Text(_fmt(_remaining), style: TextStyle(color: Colors.deepOrange.shade700, fontWeight: FontWeight.w700)),
-                                ]),
+                                Icon(Icons.account_balance_wallet, color: Theme.of(context).primaryColor),
                               ],
+                            ),
+                            const SizedBox(height: 20),
+                            _buildInfoRow('Total de ingresos', _fmt(_totalIncome), Icons.attach_money, Colors.green, isBold: true),
+                            const Divider(height: 30),
+                            _buildInfoRow('Ingresos este mes', _fmt(_totalIncome), Icons.calendar_today, Colors.blue),
+                            const SizedBox(height: 10),
+                            LinearProgressIndicator(
+                              value: 1.0, // Siempre lleno ya que solo mostramos ingresos
+                              backgroundColor: Colors.grey[200],
+                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
                             ),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
+                    // Historial de ingresos
                     Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Gastos recientes del mes', style: TextStyle(fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 8),
-                            if (_monthExpenses.isEmpty)
-                              const Text('No hay gastos registrados este mes')
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Historial de Ingresos',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).primaryColor,
+                                  ),
+                                ),
+                                Icon(Icons.history, color: Theme.of(context).primaryColor),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (_incomes.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 20.0),
+                                child: Column(
+                                  children: [
+                                    Icon(Icons.receipt_long, size: 50, color: Colors.grey[400]),
+                                    const SizedBox(height: 10),
+                                    const Text(
+                                      'No hay ingresos registrados',
+                                      style: TextStyle(color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              )
                             else
-                              ..._monthExpenses.take(5).map((e) => ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: const CircleAvatar(child: Icon(Icons.payments_outlined)),
-                                    title: Text(e.descripcion.isEmpty ? 'Gasto' : e.descripcion),
-                                    subtitle: Text('${_categoryLabel(e.categoria)} • ${_fmtDate(e.fecha)}'),
-                                    trailing: Text(e.monto.toStringAsFixed(2)),
-                                  )),
+                              ..._incomes.take(5).map((income) => _buildIncomeItem(income)),
+                            if (_incomes.isEmpty)
+                              Center(
+                                child: TextButton(
+                                  onPressed: () {
+                                    // TODO: Navegar a pantalla completa de historial
+                                  },
+                                  child: const Text('Ver todo el historial'),
+                                ),
+                              ),
                           ],
                         ),
                       ),

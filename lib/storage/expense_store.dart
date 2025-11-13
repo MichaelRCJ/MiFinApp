@@ -1,9 +1,12 @@
 import 'dart:convert';
-
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/expense.dart';
 import '../services/auth_service.dart';
+
+// Notificador global para cambios en gastos
+final ValueNotifier<void> expenseNotifier = ValueNotifier<void>(null);
 
 class ExpenseStore {
   static const String _fallbackUser = 'guest';
@@ -38,18 +41,27 @@ class ExpenseStore {
     final username = await AuthService.getLastUsername() ?? _fallbackUser;
     final key = _keyForUser(username);
     await prefs.setString(key, jsonEncode(data));
+    // Notificar a los oyentes que los gastos han cambiado
+    expenseNotifier.notifyListeners();
   }
 
   Future<void> addExpense(Expense expense) async {
     final items = await loadExpenses();
     items.add(expense);
     await saveExpenses(items);
+    // No es necesario notificar aquí ya que saveExpenses ya lo hace
   }
 
   Future<void> removeExpense(String id) async {
     final items = await loadExpenses();
     items.removeWhere((e) => e.id == id);
     await saveExpenses(items);
+    // No es necesario notificar aquí ya que saveExpenses ya lo hace
+  }
+
+  Future<List<Expense>> getExpensesByCategory(ExpenseCategory category) async {
+    final allExpenses = await loadExpenses();
+    return allExpenses.where((e) => e.categoria == category).toList();
   }
 }
 

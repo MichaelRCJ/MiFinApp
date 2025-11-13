@@ -71,10 +71,8 @@ class EmailService {
       ..text = textBody;
 
     try {
-      final sendReport = await send(message, _server!);
-      if (sendReport == null) {
-        throw StateError('No se pudo enviar el correo');
-      }
+      // Send the email - we don't need to store the sendReport as it's not used
+      await send(message, _server!);
     } on MailerException catch (e) {
       // Primer error con configuración actual
       final primaryReasons = (e.problems.isNotEmpty)
@@ -84,7 +82,6 @@ class EmailService {
       // Intento de reintento con configuración alterna (cambia SSL/puerto)
       try {
         final host = (_config?['host'] ?? '').toString();
-        final basePort = int.tryParse((_config?['port'] ?? '').toString()) ?? 587;
         final baseSsl = (_config?['ssl'] ?? false) == true;
         final altServer = SmtpServer(
           host,
@@ -94,10 +91,8 @@ class EmailService {
           password: _server?.password,
           ignoreBadCertificate: false,
         );
-        final retryReport = await send(message, altServer);
-        if (retryReport == null) {
-          throw StateError('No se pudo enviar el correo en reintento');
-        }
+        // Send the email with alternative server configuration
+        await send(message, altServer);
         return; // Reintento exitoso
       } on MailerException catch (e2) {
         final retryReasons = (e2.problems.isNotEmpty)

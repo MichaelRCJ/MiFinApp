@@ -48,6 +48,8 @@ class _AnalysisTabState extends State<AnalysisTab> {
         return 'Transporte';
       case ExpenseCategory.alojamiento:
         return 'Alojamiento';
+      case ExpenseCategory.comida:
+        return 'Comida';
       case ExpenseCategory.otros:
         return 'Otras adicionales';
     }

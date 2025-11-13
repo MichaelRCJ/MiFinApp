@@ -1,4 +1,4 @@
-enum BudgetCategory { arriendo, comida, transporte, otros }
+enum BudgetCategory { arriendo, comida, transporte, academicos, otros }
 
 class BudgetConfig {
   final double monthlyDeposit;

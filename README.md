@@ -1,10 +1,56 @@
-# MiFinApp — Guía para correr el proyecto
+# MiFinApp - Gestor de Finanzas Personales
 
-Este repositorio contiene una aplicación Flutter lista para ejecutarse en Android, iOS, Web y Windows. Además, incluye una segunda app de ejemplo dentro de `aplicacion1/`.
+[![Flutter](https://img.shields.io/badge/Flutter-3.16.0-blue.svg)](https://flutter.dev/)
+[![Dart](https://img.shields.io/badge/Dart-3.9.2-blue.svg)](https://dart.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Aplicación de gestión financiera personal desarrollada con Flutter, compatible con Android, iOS, Web y Windows. Incluye un sistema completo para el seguimiento de gastos, presupuestos, ingresos y análisis financiero.
+
+## 📋 Tabla de Contenidos
+
+- [Características Principales](#-características-principales)
+- [Requisitos](#-requisitos)
+- [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Configuración Inicial](#-configuración-inicial)
+- [Ejecución del Proyecto](#-cómo-ejecutar)
+- [Construcción para Producción](#-builds-de-producción)
+- [Personalización](#-personalización)
+- [Solución de Problemas](#-problemas-comunes)
+- [Contribución](#-contribución)
+- [Licencia](#-licencia)
+
+## ✨ Características Principales
+
+- **Autenticación de Usuarios**
+  - Registro e inicio de sesión seguros
+  - Recuperación de contraseña mediante correo electrónico
+  - Personalización de perfil
+
+- **Gestión Financiera**
+  - Registro de gastos e ingresos
+  - Categorización de transacciones
+  - Seguimiento de presupuestos
+  - Análisis de gastos con gráficos
+
+- **Plataformas Soportadas**
+  - 📱 Android
+  - 🍎 iOS
+  - 🌐 Web
+  - 🖥️ Windows
+  - 🐧 Linux
+  - 🍏 macOS
+
+- **Características Adicionales**
+  - Interfaz intuitiva y moderna
+  - Modo oscuro/claro
+  - Sincronización entre dispositivos (próximamente)
+  - Exportación de datos (próximamente)
+
+## 🛠 Requisitos
 
 Usa esta guía paso a paso para instalar requisitos, preparar el entorno y ejecutar sin problemas.
 
-## Requisitos
+## 🛠 Requisitos
 
 - **Flutter** instalado y en el `PATH`.
   - Debes usar una versión de Flutter que incluya **Dart >= 3.9.2** (ver `environment.sdk` en `pubspec.yaml`).
@@ -28,7 +74,34 @@ Sugerencias de configuración Flutter:
 
 Puedes ejecutar cualquiera de las dos. Si no se indica lo contrario, las instrucciones se refieren a la app de la **raíz**.
 
-## Estructura del proyecto (detalle)
+## 🔄 Flujo de Recuperación de Contraseña
+
+### 📱 Pantalla de Recuperación
+La pantalla de "Olvidé mi Contraseña" permite a los usuarios recuperar el acceso a sus cuentas de manera segura a través de su correo electrónico registrado.
+
+### 🔑 Componentes Utilizados
+- **Campo de Texto (TextField)**: Para ingresar el correo electrónico registrado
+- **Botón de Acción (ElevatedButton)**: Para enviar el enlace de recuperación
+- **Firebase Authentication**: Gestiona el envío de correos de recuperación
+- **Indicador de Carga (CircularProgressIndicator)**: Muestra el estado de carga durante el proceso
+- **Mensajes de Retroalimentación (SnackBar)**: Informa al usuario sobre el resultado de la operación
+
+### 🔄 Flujo de Uso
+1. El usuario selecciona "¿Olvidaste tu contraseña?" en la pantalla de inicio de sesión
+2. Ingresa su correo electrónico registrado
+3. Presiona el botón "Enviar enlace de recuperación"
+4. El sistema procesa la solicitud y muestra un indicador de carga
+5. Se envía un correo electrónico con el enlace de restablecimiento
+6. El usuario recibe una notificación visual del estado de la operación
+
+### ✅ Validaciones Implementadas
+- Verificación de formato de correo electrónico
+- Validación de campos obligatorios
+- Manejo de errores de Firebase Auth
+- Retroalimentación visual durante el proceso de recuperación
+- Mensajes claros de éxito o error para el usuario
+
+## 📁 Estructura del Proyecto
 
 ```text
 MiFinApp/
@@ -93,7 +166,7 @@ MiFinApp/
 - **Persistencia**: en `lib/storage/` (`budget_store.dart`, `expense_store.dart`, `settings_store.dart`).
 - **Recursos estáticos**: en `assets/images/` y `assets/config/` (declarados en `pubspec.yaml`).
 
-## Preparación (una vez por clonación)
+## ⚙️ Configuración Inicial
 
 1. Clona el repositorio.
 2. En la raíz del proyecto, instala dependencias:
@@ -105,7 +178,7 @@ MiFinApp/
 
 Si quieres trabajar con la app dentro de `aplicacion1/`, entra a esa carpeta y repite los pasos 2–3 allí.
 
-## Cómo ejecutar
+## 🚀 Cómo ejecutar
 
 Desde la raíz del proyecto:
 
@@ -120,7 +193,7 @@ Desde la raíz del proyecto:
 
 Para la app secundaria en `aplicacion1/`, ejecuta los mismos comandos pero dentro de esa carpeta.
 
-## Builds de producción (básico)
+## 📦 Builds de Producción
 
 - Android (APK):
   - `flutter build apk --release`
@@ -132,7 +205,9 @@ Para la app secundaria en `aplicacion1/`, ejecuta los mismos comandos pero dentr
 Consulta la documentación oficial para iOS (requiere macOS y configuración de certificados):
 https://docs.flutter.dev/deployment/ios
 
-## Íconos de la app
+## 🎨 Personalización
+
+### Íconos de la Aplicación
 
 La app raíz usa `flutter_launcher_icons` para generar íconos (ver `pubspec.yaml`).
 
@@ -140,7 +215,7 @@ La app raíz usa `flutter_launcher_icons` para generar íconos (ver `pubspec.yam
 2. Ejecuta:
    - `dart run flutter_launcher_icons`
 
-## Problemas comunes
+## 🐛 Problemas Comunes
 
 - Dependencias no se instalan:
   - Ejecuta `flutter pub get -v` y revisa conexión a internet y `pubspec.yaml`.
@@ -151,14 +226,27 @@ La app raíz usa `flutter_launcher_icons` para generar íconos (ver `pubspec.yam
 - Windows Desktop falla al compilar:
   - Instala Visual Studio con la carga de trabajo C++ y reinicia la terminal. Luego `flutter doctor -v`.
 
-## Comandos útiles
+## 💻 Comandos Útiles
 
 - Listar dispositivos: `flutter devices`
 - Limpiar cachés: `flutter clean && flutter pub get`
 - Actualizar dependencias: `flutter pub upgrade --major-versions`
 
-## Recursos
+## 🌐 Recursos
 
-- Documentación Flutter: https://docs.flutter.dev/
-- Cookbook de ejemplos: https://docs.flutter.dev/cookbook
+- [Documentación Oficial de Flutter](https://docs.flutter.dev/)
+- [Cookbook de Ejemplos](https://docs.flutter.dev/cookbook)
+- [Paquetes de Flutter](https://pub.dev/)
+- [Comunidad Flutter en Español](https://esflutter.dev/)
 
+## 🤝 Contribución
+
+¡Las contribuciones son bienvenidas! Por favor, lee nuestra [guía de contribución](CONTRIBUTING.md) antes de enviar un pull request.
+
+## 📄 Licencia
+
+Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más información.
+
+---
+
+Desarrollado con ❤️ por [Tu Nombre o Equipo]
