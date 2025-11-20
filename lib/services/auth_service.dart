@@ -1,9 +1,13 @@
 import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   static const String _kUsersKey = 'auth_users_v1';
   static const String _kLastUsernameKey = 'auth_last_username_v1';
+  static final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
 
   // Estructura interna: { "username": {"password": "...", "email": "...", "name": "...", "surname": "..." } }
   static Future<Map<String, dynamic>> _readUsers() async {
@@ -16,6 +20,50 @@ class AuthService {
       return <String, dynamic>{};
     } catch (_) {
       return <String, dynamic>{};
+    }
+  }
+
+  static Future<void> _upsertFirebaseUser(User user) async {
+    final username = (user.email?.trim().toLowerCase().isNotEmpty ?? false)
+        ? user.email!.trim().toLowerCase()
+        : user.uid;
+
+    final users = await _readUsers();
+    final existing = users[username];
+    final data = existing is Map<String, dynamic>
+        ? Map<String, dynamic>.from(existing)
+        : <String, dynamic>{};
+
+    data['email'] = user.email ?? data['email'] ?? '';
+    data['name'] = user.displayName ?? data['name'] ?? '';
+    data['surname'] = data['surname'] ?? '';
+    data['photoUrl'] = user.photoURL ?? data['photoUrl'];
+    data['authProvider'] = 'google';
+    data['lastLogin'] = DateTime.now().toIso8601String();
+
+    users[username] = data;
+    await _writeUsers(users);
+    await setLastUsername(username);
+  }
+
+  static Future<UserCredential?> signInWithGoogle() async {
+    try {
+      final googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) return null;
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCredential = await _firebaseAuth.signInWithCredential(credential);
+      final user = userCredential.user;
+      if (user != null) {
+        await _upsertFirebaseUser(user);
+      }
+      return userCredential;
+    } on Exception {
+      rethrow;
     }
   }
 
@@ -115,6 +163,11 @@ class AuthService {
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kLastUsernameKey);
+    await _firebaseAuth.signOut();
+    final google = GoogleSignIn();
+    if (await google.isSignedIn()) {
+      await google.signOut();
+    }
   }
 
   // Actualiza nombre/correo y opcionalmente cambia el username (si no está ocupado)

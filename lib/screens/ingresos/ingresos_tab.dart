@@ -5,9 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../models/budget.dart';
-import '../../models/expense.dart';
-import '../../services/service_locator.dart';
 import '../../services/auth_service.dart';
 
 class IncomeTab extends StatefulWidget {
@@ -90,9 +87,6 @@ class _IncomeTabState extends State<IncomeTab> {
     }
   }
 
-  double get _totalSpent => 0; // No mostramos gastos en esta pantalla
-  double get _remaining => _totalIncome; // Mostramos el total de ingresos como disponible
-
   String _fmt(num v) => '\$${v.toStringAsFixed(2).replaceAllMapped(
         RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
         (Match m) => '${m[1]},',
@@ -167,21 +161,6 @@ class _IncomeTabState extends State<IncomeTab> {
       return '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
     }
   }
-  String _categoryLabel(ExpenseCategory c) {
-    switch (c) {
-      case ExpenseCategory.academica:
-        return 'Académica';
-      case ExpenseCategory.transporte:
-        return 'Transporte';
-      case ExpenseCategory.alojamiento:
-        return 'Alojamiento';
-      case ExpenseCategory.comida:
-        return 'Comida';
-      case ExpenseCategory.otros:
-        return 'Otras adicionales';
-    }
-  }
-
   Future<bool> _saveNewIncome(IncomeRecord newIncome) async {
     try {
       final prefs = await SharedPreferences.getInstance();

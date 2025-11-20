@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "674645563015",
+    "project_id": "myfinapp-28865",
+    "storage_bucket": "myfinapp-28865.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674645563015:android:fa1a6c81edbc1d50d88a22",
+        "android_client_info": {
+          "package_name": "com.example.aplicacion1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "674645563015-602aubfjai8u425vo204ou0gee1rcj42.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzPx-bjTd3dtGz1jJXMFFek_R3caKjsGU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "674645563015-602aubfjai8u425vo204ou0gee1rcj42.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "674645563015-113jhvmmn7a6reuh6pa10orc9sjvdjni.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mifinapp.finanzas"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

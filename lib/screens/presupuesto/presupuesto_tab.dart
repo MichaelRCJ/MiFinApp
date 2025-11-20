@@ -27,8 +27,6 @@ class _BudgetTabState extends State<BudgetTab> {
   
   // Estado de la aplicación
   bool _isLoading = true;
-  bool _isSaving = false;
-  String? _errorMessage;
   
   // Rastrear categorías con presupuesto extendido
   final Map<BudgetCategory, bool> _presupuestoExtendido = {
@@ -217,50 +215,6 @@ class _BudgetTabState extends State<BudgetTab> {
     return value.toStringAsFixed(2);
   }
   
-  // Guardar la configuración del presupuesto
-  Future<bool> _saveBudget() async {
-    if (_isSaving) return false;
-    
-    try {
-      setState(() => _isSaving = true);
-      
-      // Validar que el total asignado no supere el depósito mensual
-      if (_isOverBudget) {
-        _showError('El total asignado no puede ser mayor al depósito mensual');
-        return false;
-      }
-      
-      final cfg = BudgetConfig(
-        monthlyDeposit: _monthlyDeposit,
-        allocationsAmount: {
-          for (final c in BudgetCategory.values)
-            c: _parseAmount(_amount[c]!.text),
-        },
-      );
-      
-      await budgetStore.saveConfig(cfg);
-      
-      // Notificar a los listeners
-      if (mounted) {
-        _updateController.add(null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Presupuesto guardado exitosamente')),
-        );
-      }
-      
-      return true;
-    } catch (e) {
-      if (mounted) {
-        _showError('Error al guardar el presupuesto: $e');
-      }
-      return false;
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
-    }
-  }
-
   // Mapea las categorías de presupuesto a descripciones amigables
   String _getBudgetCategoryName(BudgetCategory category) {
     return switch (category) {
@@ -270,21 +224,6 @@ class _BudgetTabState extends State<BudgetTab> {
       BudgetCategory.academicos => 'Gastos académicos',
       BudgetCategory.otros => 'Otros gastos presupuestados',
     };
-  }
-
-  // Este método ya no crea gastos automáticamente, solo actualiza el presupuesto
-  Future<void> _createBudgetExpense(BudgetCategory category, double amount) async {
-    // No hacemos nada aquí ya que no queremos crear gastos automáticamente
-    // Solo mantenemos el método para compatibilidad con el código existente
-    // pero no creará ningún gasto
-    debugPrint('Presupuesto actualizado para $category: $amount');
-    
-    // Actualizamos el controlador de texto para reflejar el cambio
-    if (mounted) {
-      setState(() {
-        _amount[category]!.text = _formatCurrency(amount);
-      });
-    }
   }
 
   Future<bool> _save() async {
@@ -394,10 +333,6 @@ class _BudgetTabState extends State<BudgetTab> {
         _showError('Error al guardar el presupuesto: $e');
       }
       return false;
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
     }
   }
 
@@ -707,7 +642,6 @@ class _BudgetTabState extends State<BudgetTab> {
 
   Widget _buildCategoryRow(BudgetCategory category) {
     final expenseCategory = _mapToExpenseCategory(category);
-    final categoryName = category.toString().split('.').last;
     
     return FutureBuilder<List<Expense>>(
       future: expenseStore.getExpensesByCategory(expenseCategory),

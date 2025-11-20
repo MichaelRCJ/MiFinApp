@@ -258,6 +258,8 @@ class _HistoryListState extends State<_HistoryList> {
         return 'Transporte';
       case ExpenseCategory.alojamiento:
         return 'Alojamiento';
+      case ExpenseCategory.comida:
+        return 'Comida';
       case ExpenseCategory.otros:
         return 'Otras adicionales';
     }

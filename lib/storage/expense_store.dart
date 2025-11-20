@@ -5,8 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/expense.dart';
 import '../services/auth_service.dart';
 
+class ExpenseChangeNotifier extends ChangeNotifier {
+  void signal() => notifyListeners();
+}
+
 // Notificador global para cambios en gastos
-final ValueNotifier<void> expenseNotifier = ValueNotifier<void>(null);
+final ExpenseChangeNotifier expenseNotifier = ExpenseChangeNotifier();
 
 class ExpenseStore {
   static const String _fallbackUser = 'guest';
@@ -42,7 +46,7 @@ class ExpenseStore {
     final key = _keyForUser(username);
     await prefs.setString(key, jsonEncode(data));
     // Notificar a los oyentes que los gastos han cambiado
-    expenseNotifier.notifyListeners();
+    expenseNotifier.signal();
   }
 
   Future<void> addExpense(Expense expense) async {

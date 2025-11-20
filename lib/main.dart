@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'screens/onboarding/splash_screen.dart';
 import 'screens/auth/inicio_sesion_screen.dart';
 import 'screens/home/home_screen.dart';
@@ -8,7 +10,11 @@ import 'screens/gastos/registrar_gasto_screen.dart';
 import 'screens/common/particle_background.dart';
 import 'services/service_locator.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const ShinyApp());
 }
 

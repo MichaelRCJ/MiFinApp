@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../../../models/budget.dart';
 import '../../../../models/expense.dart';
 import '../../../../services/service_locator.dart';
@@ -306,13 +305,28 @@ class _MonthlySpendCardState extends State<_MonthlySpendCard> {
   double _spent = 0;
   bool _loading = true;
   BudgetConfig? _config;
-  late VoidCallback _onExpensesChanged;
-  late VoidCallback _onBudgetChanged;
+  late final VoidCallback _onExpensesChanged;
+  late final VoidCallback _onBudgetChanged;
 
   @override
   void initState() {
     super.initState();
+    _onExpensesChanged = () {
+      if (mounted) _load();
+    };
+    _onBudgetChanged = () {
+      if (mounted) _load();
+    };
+    expenseNotifier.addListener(_onExpensesChanged);
+    budgetStore.addListener(_onBudgetChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    expenseNotifier.removeListener(_onExpensesChanged);
+    budgetStore.removeListener(_onBudgetChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -365,7 +379,7 @@ class _MonthlySpendCardState extends State<_MonthlySpendCard> {
     // Calcular total asignado a categorías
     final totalAsignado = _config == null 
         ? 0 
-        : _config!.allocationsAmount.values.fold<double>(0, (sum, amount) => sum + (amount ?? 0));
+        : _config!.allocationsAmount.values.fold<double>(0, (sum, amount) => sum + amount);
     final restante = _initial - totalAsignado;
     final ratio = _initial <= 0 ? 0.0 : (totalAsignado / _initial).clamp(0.0, 1.0);
     

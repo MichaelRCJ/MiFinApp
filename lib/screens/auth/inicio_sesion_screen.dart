@@ -66,6 +66,29 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
     }
   }
 
+  Future<void> _onGoogleLogin() async {
+    setState(() => _loading = true);
+    try {
+      final credential = await AuthService.signInWithGoogle();
+      if (credential == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Inicio con Google cancelado')),
+          );
+        }
+        return;
+      }
+      _goHome();
+    } on Exception catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error Google: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _loadLogoTemplate() async {
     try {
       final raw = await rootBundle.loadString('assets/images/logo.svg');
@@ -258,8 +281,7 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      onPressed: () => ScaffoldMessenger.of(context)
-                          .showSnackBar(const SnackBar(content: Text('Login con Google no implementado'))),
+                      onPressed: _loading ? null : _onGoogleLogin,
                       icon: const Icon(Icons.g_mobiledata, size: 32),
                     ),
                     IconButton(
