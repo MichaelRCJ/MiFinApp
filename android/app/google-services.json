@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "674645563015",
+    "firebase_url": "https://myfinapp-28865-default-rtdb.firebaseio.com",
     "project_id": "myfinapp-28865",
     "storage_bucket": "myfinapp-28865.firebasestorage.app"
   },
@@ -13,6 +14,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "674645563015-9ua13a284o2d5pt32me3k9ut394le6ar.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aplicacion1",
+            "certificate_hash": "7e6772e94a9aa5e30be20f3e64d8dd1c9ee0dd71"
+          }
+        },
         {
           "client_id": "674645563015-602aubfjai8u425vo204ou0gee1rcj42.apps.googleusercontent.com",
           "client_type": 3
