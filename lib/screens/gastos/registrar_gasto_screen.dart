@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../models/expense.dart';
+import '../../models/budget.dart';
 import '../../services/service_locator.dart';
+import '../../storage/budget_store.dart';
+import '../../services/auth_service.dart';
 
 class RegistrarGastoScreen extends StatefulWidget {
   static const String routeName = '/registrar-gasto';
@@ -37,6 +40,20 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
     if (!_formKey.currentState!.validate()) return;
     final monto = double.tryParse(_montoCtrl.text.trim()) ?? 0;
 
+    // Verificar si excede el presupuesto antes de guardar
+    final budgetExceeded = await _checkBudgetExceeded(_categoria, monto);
+
+    // Si excede el presupuesto, mostrar diálogo de confirmación
+    if (budgetExceeded != null) {
+      final shouldContinue = await _showBudgetExceededDialog(budgetExceeded);
+      if (shouldContinue != true) {
+        return; // Usuario canceló, no guardar el gasto
+      }
+      
+      // Si el usuario confirmó, actualizar automáticamente el presupuesto
+      await _updateBudgetAutomatically(_categoria, monto);
+    }
+
     final expense = Expense(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       descripcion: _descripcionCtrl.text.trim(),
@@ -47,6 +64,269 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
     await expenseStore.addExpense(expense);
     if (!mounted) return;
     Navigator.of(context).pop(true);
+  }
+
+  // Verificar si el gasto excede el presupuesto
+  Future<Map<String, dynamic>?> _checkBudgetExceeded(ExpenseCategory category, double monto) async {
+    try {
+      debugPrint('🔍 Checking budget exceeded for category: $category, amount: $monto');
+      
+      final username = await AuthService.getLastUsername() ?? 'default';
+      final budgetConfig = await budgetStore.loadConfig();
+      
+      debugPrint('💰 Budget config loaded: ${budgetConfig?.monthlyDeposit}');
+      
+      if (budgetConfig == null) {
+        debugPrint('❌ No budget config found');
+        return null;
+      }
+
+      // Mapear categoría de gasto a categoría de presupuesto
+      BudgetCategory budgetCategory;
+      switch (category) {
+        case ExpenseCategory.alojamiento:
+          budgetCategory = BudgetCategory.arriendo;
+          break;
+        case ExpenseCategory.comida:
+          budgetCategory = BudgetCategory.comida;
+          break;
+        case ExpenseCategory.transporte:
+          budgetCategory = BudgetCategory.transporte;
+          break;
+        case ExpenseCategory.academica:
+          budgetCategory = BudgetCategory.academicos;
+          break;
+        case ExpenseCategory.otros:
+          budgetCategory = BudgetCategory.otros;
+          break;
+      }
+
+      final allocatedBudget = budgetConfig.allocationsAmount[budgetCategory] ?? 0.0;
+      debugPrint('📊 Allocated budget for $budgetCategory: $allocatedBudget');
+      
+      // Obtener gastos existentes de esta categoría en el mes actual
+      final allExpenses = await expenseStore.loadExpenses();
+      final now = DateTime.now();
+      final monthExpenses = allExpenses.where((e) => 
+        e.categoria == category && 
+        !e.esPresupuestado &&
+        e.fecha.year == now.year && 
+        e.fecha.month == now.month
+      ).toList();
+      
+      debugPrint('📋 Found ${monthExpenses.length} expenses for this category this month');
+      
+      final currentSpent = monthExpenses.fold<double>(0, (sum, e) => sum + e.monto);
+      final newTotal = currentSpent + monto;
+      
+      debugPrint('💸 Current spent: $currentSpent, New total: $newTotal, Allocated: $allocatedBudget');
+
+      if (allocatedBudget > 0 && newTotal > allocatedBudget) {
+        debugPrint('⚠️ BUDGET EXCEEDED! Showing dialog...');
+        return {
+          'category': _getBudgetCategoryName(budgetCategory),
+          'allocated': allocatedBudget,
+          'current': currentSpent,
+          'newExpense': monto,
+          'total': newTotal,
+          'exceeded': newTotal - allocatedBudget,
+        };
+      }
+
+      debugPrint('✅ Budget not exceeded');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error checking budget: $e');
+      return null;
+    }
+  }
+
+  // Mostrar diálogo de presupuesto excedido
+  Future<bool?> _showBudgetExceededDialog(Map<String, dynamic> budgetInfo) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('¡Presupuesto Excedido!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Este gasto excede tu presupuesto en ${budgetInfo['category']}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Presupuesto:'),
+                      Text('\$${budgetInfo['allocated'].toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Gastado actualmente:'),
+                      Text('\$${budgetInfo['current'].toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Este gasto:'),
+                      Text('\$${budgetInfo['newExpense'].toStringAsFixed(2)}', 
+                           style: const TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                  const Divider(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total después del gasto:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        '\$${budgetInfo['total'].toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Excedente:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        '+\$${budgetInfo['exceeded'].toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('¿Deseas continuar de todas formas con este gasto?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar gasto'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sí, registrar gasto'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Actualizar automáticamente el presupuesto cuando se excede
+  Future<void> _updateBudgetAutomatically(ExpenseCategory category, double newExpenseAmount) async {
+    try {
+      final budgetConfig = await budgetStore.loadConfig();
+      if (budgetConfig == null) return;
+
+      // Mapear categoría de gasto a categoría de presupuesto
+      BudgetCategory budgetCategory;
+      switch (category) {
+        case ExpenseCategory.alojamiento:
+          budgetCategory = BudgetCategory.arriendo;
+          break;
+        case ExpenseCategory.comida:
+          budgetCategory = BudgetCategory.comida;
+          break;
+        case ExpenseCategory.transporte:
+          budgetCategory = BudgetCategory.transporte;
+          break;
+        case ExpenseCategory.academica:
+          budgetCategory = BudgetCategory.academicos;
+          break;
+        case ExpenseCategory.otros:
+          budgetCategory = BudgetCategory.otros;
+          break;
+      }
+
+      // Obtener gastos existentes de esta categoría en el mes actual
+      final allExpenses = await expenseStore.loadExpenses();
+      final now = DateTime.now();
+      final monthExpenses = allExpenses.where((e) => 
+        e.categoria == category && 
+        !e.esPresupuestado &&
+        e.fecha.year == now.year && 
+        e.fecha.month == now.month
+      ).toList();
+      
+      final currentSpent = monthExpenses.fold<double>(0, (sum, e) => sum + e.monto);
+      final newTotal = currentSpent + newExpenseAmount;
+
+      // Actualizar el presupuesto asignado para esta categoría
+      final updatedAllocations = Map<BudgetCategory, double>.from(budgetConfig.allocationsAmount);
+      updatedAllocations[budgetCategory] = newTotal;
+
+      // Guardar la configuración actualizada
+      final updatedConfig = BudgetConfig(
+        monthlyDeposit: budgetConfig.monthlyDeposit,
+        allocationsAmount: updatedAllocations,
+        lastUpdated: DateTime.now(),
+      );
+
+      await budgetStore.saveConfig(updatedConfig);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Presupuesto de ${_getBudgetCategoryName(budgetCategory)} actualizado automáticamente'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating budget: $e');
+    }
+  }
+
+  String _getBudgetCategoryName(BudgetCategory category) {
+    switch (category) {
+      case BudgetCategory.arriendo:
+        return 'Alojamiento';
+      case BudgetCategory.comida:
+        return 'Comida';
+      case BudgetCategory.transporte:
+        return 'Transporte';
+      case BudgetCategory.academicos:
+        return 'Académicos';
+      case BudgetCategory.otros:
+        return 'Otros';
+    }
   }
 
   Future<void> _pickFecha() async {

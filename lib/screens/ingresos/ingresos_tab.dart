@@ -6,6 +6,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/auth_service.dart';
+import '../../models/budget.dart';
+import '../../services/service_locator.dart';
 
 class IncomeTab extends StatefulWidget {
   const IncomeTab({super.key});
@@ -161,7 +163,7 @@ class _IncomeTabState extends State<IncomeTab> {
       return '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
     }
   }
-  Future<bool> _saveNewIncome(IncomeRecord newIncome) async {
+  Future<bool> _saveNewIncome(IncomeRecord newIncome, [bool addToBudget = true]) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final username = await AuthService.getLastUsername() ?? 'default';
@@ -182,6 +184,11 @@ class _IncomeTabState extends State<IncomeTab> {
         incomes.map((income) => jsonEncode(income.toJson())).toList(),
       );
       
+      // ACTUALIZAR DEPÓSITO MENSUAL EN PRESUPUESTO (si el usuario lo desea)
+      if (addToBudget) {
+        await _updateMonthlyDeposit(newIncome.amount);
+      }
+      
       // Actualizar UI
       if (mounted) {
         setState(() {
@@ -197,11 +204,57 @@ class _IncomeTabState extends State<IncomeTab> {
     }
   }
 
+  // Actualizar saldo en presupuesto
+  Future<void> _updateMonthlyDeposit(double incomeAmount) async {
+    try {
+      // Cargar configuración actual del presupuesto
+      final currentConfig = await budgetStore.loadConfig();
+      
+      // Calcular nuevo saldo
+      final currentBalance = currentConfig?.monthlyDeposit ?? 0.0;
+      final newBalance = currentBalance + incomeAmount;
+      
+      // Crear nueva configuración con el saldo actualizado
+      final updatedConfig = BudgetConfig(
+        monthlyDeposit: newBalance,
+        allocationsAmount: currentConfig?.allocationsAmount ?? 
+            {for (final category in BudgetCategory.values) category: 0.0},
+        lastUpdated: DateTime.now(),
+      );
+      
+      // Guardar usando BudgetStore para que notifique a los listeners
+      await budgetStore.saveConfig(updatedConfig);
+      
+      debugPrint('✅ Saldo actualizado correctamente: \$${newBalance.toStringAsFixed(2)}');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saldo actualizado: \$${newBalance.toStringAsFixed(2)}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating balance: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al actualizar saldo: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _showAddIncomeDialog() async {
     final amountController = TextEditingController();
     final descriptionController = TextEditingController();
     final formKey = GlobalKey<FormState>();
     DateTime selectedDate = DateTime.now();
+    bool addToBudget = true; // Opción por defecto
     
     return showDialog(
       context: context,
@@ -267,6 +320,17 @@ class _IncomeTabState extends State<IncomeTab> {
                       }
                     },
                   ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    title: const Text('Añadir al saldo'),
+                    subtitle: const Text('Actualizará automáticamente tu saldo disponible'),
+                    value: addToBudget,
+                    onChanged: (value) {
+                      setState(() => addToBudget = value);
+                    },
+                    secondary: Icon(Icons.account_balance_wallet, 
+                        color: addToBudget ? Colors.green : Colors.grey),
+                  ),
                 ],
               ),
             ),
@@ -295,21 +359,26 @@ class _IncomeTabState extends State<IncomeTab> {
                   );
                   
                   // Guardar el ingreso
-                  final success = await _saveNewIncome(newIncome);
+                  final success = await _saveNewIncome(newIncome, addToBudget);
                   
                   if (mounted) {
                     Navigator.pop(context);
                     
                     if (success) {
                       // Mostrar notificación de éxito
+                      String message = addToBudget 
+                          ? '¡Ingreso de \$${amount.toStringAsFixed(2)} registrado y añadido a tu saldo!'
+                          : '¡Ingreso de \$${amount.toStringAsFixed(2)} registrado!';
+                      
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('¡Ingreso de \$${amount.toStringAsFixed(2)} registrado!'),
+                          content: Text(message),
                           backgroundColor: Colors.green,
                           behavior: SnackBarBehavior.floating,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
+                          duration: const Duration(seconds: 4),
                         ),
                       );
                     } else {

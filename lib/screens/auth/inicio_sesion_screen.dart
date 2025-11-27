@@ -22,17 +22,17 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _loading = false;
   String? _logoTemplate; // raw SVG content loaded once
+  
+  // Performance optimization: cache computed values
+  static String? _cachedColorizedSvg;
+  static Color? _lastPrimaryColor;
+  static Color? _lastSecondaryColor;
 
   @override
   void initState() {
     super.initState();
     _loadLogoTemplate();
-    AuthService.getLastUsername().then((value) {
-      if (!mounted) return;
-      if (value != null && value.isNotEmpty) {
-        _userController.text = value;
-      }
-    });
+    _loadLastUsername();
   }
 
   @override
@@ -44,6 +44,15 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
 
   void _goHome() {
     Navigator.of(context).pushReplacementNamed(HomeScreen.routeName);
+  }
+
+  // Performance optimized: separate method for loading username
+  Future<void> _loadLastUsername() async {
+    final value = await AuthService.getLastUsername();
+    if (!mounted) return;
+    if (value != null && value.isNotEmpty) {
+      _userController.text = value;
+    }
   }
 
   Future<void> _onLogin() async {
@@ -115,6 +124,29 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
       (c.green * f).round(),
       (c.blue * f).round(),
     );
+  }
+
+  // Performance optimized: cached SVG colorization
+  String _getCachedColorizedSvg(Color primary, Color secondary) {
+    if (_logoTemplate == null) return '';
+    
+    // Return cached result if colors haven't changed
+    if (_cachedColorizedSvg != null && 
+        _lastPrimaryColor == primary && 
+        _lastSecondaryColor == secondary) {
+      return _cachedColorizedSvg!;
+    }
+    
+    // Compute and cache new result
+    _cachedColorizedSvg = _colorizeSvg(
+      _logoTemplate!,
+      primary: primary,
+      secondary: _ensureContrast(primary, secondary),
+    );
+    _lastPrimaryColor = primary;
+    _lastSecondaryColor = secondary;
+    
+    return _cachedColorizedSvg!;
   }
 
   String _colorizeSvg(String template, {required Color primary, required Color secondary}) {
@@ -203,10 +235,9 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
                                 fit: BoxFit.cover,
                               )
                             : SvgPicture.string(
-                                _colorizeSvg(
-                                  _logoTemplate!,
-                                  primary: theme.colorScheme.primary,
-                                  secondary: _ensureContrast(
+                                _getCachedColorizedSvg(
+                                  theme.colorScheme.primary,
+                                  _ensureContrast(
                                     theme.colorScheme.primary,
                                     theme.colorScheme.secondary,
                                   ),

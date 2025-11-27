@@ -3,8 +3,13 @@ enum BudgetCategory { arriendo, comida, transporte, academicos, otros }
 class BudgetConfig {
   final double monthlyDeposit;
   final Map<BudgetCategory, double> allocationsAmount; // fixed amount per category
+  final DateTime lastUpdated;
 
-  const BudgetConfig({required this.monthlyDeposit, required this.allocationsAmount});
+  const BudgetConfig({
+    required this.monthlyDeposit, 
+    required this.allocationsAmount,
+    required this.lastUpdated,
+  });
 
   double allocationAmount(BudgetCategory c) {
     return allocationsAmount[c] ?? 0;

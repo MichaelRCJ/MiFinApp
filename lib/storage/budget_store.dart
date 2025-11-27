@@ -22,6 +22,7 @@ class BudgetStore extends ChangeNotifier {
       'monthlyDeposit': config.monthlyDeposit,
       // Persist as fixed amounts
       'allocationsAmount': config.allocationsAmount.map((k, v) => MapEntry(k.name, v)),
+      'lastUpdated': config.lastUpdated.toIso8601String(),
     };
     await prefs.setString(key, jsonEncode(data));
     notifyListeners();
@@ -48,27 +49,41 @@ class BudgetStore extends ChangeNotifier {
 
     if (map.containsKey('allocationsAmount')) {
       // New schema: fixed amounts
-      final m = (map['allocationsAmount'] as Map);
-      m.forEach((k, v) {
-        alloc[BudgetCategory.values.firstWhere((e) => e.name == k)] = (v as num).toDouble();
-      });
-    } else if (map.containsKey('allocations')) {
-      // Legacy schema: percents, convert to amounts
-      final m = (map['allocations'] as Map);
-      m.forEach((k, v) {
-        final pct = (v as num).toDouble();
-        final amount = deposit * (pct / 100.0);
-        alloc[BudgetCategory.values.firstWhere((e) => e.name == k)] = amount;
-      });
-      // Persist back in new format to avoid repeated conversion
-      final newData = {
-        'monthlyDeposit': deposit,
-        'allocationsAmount': alloc.map((k, v) => MapEntry(k.name, v)),
-      };
-      await prefs.setString(key, jsonEncode(newData));
+      final allocMap = map['allocationsAmount'] as Map<String, dynamic>;
+      for (final entry in allocMap.entries) {
+        final cat = BudgetCategory.values.firstWhere(
+          (c) => c.name == entry.key,
+          orElse: () => BudgetCategory.otros,
+        );
+        alloc[cat] = (entry.value as num).toDouble();
+      }
+    } else {
+      // Legacy schema: percentages
+      final percentages = map['allocations'] as Map<String, dynamic>?;
+      if (percentages != null) {
+        for (final entry in percentages.entries) {
+          final cat = BudgetCategory.values.firstWhere(
+            (c) => c.name == entry.key,
+            orElse: () => BudgetCategory.otros,
+          );
+          alloc[cat] = deposit * ((entry.value as num).toDouble() / 100);
+        }
+      }
     }
 
-    return BudgetConfig(monthlyDeposit: deposit, allocationsAmount: alloc);
+    // Parse lastUpdated, default to now if not present
+    DateTime lastUpdated;
+    if (map.containsKey('lastUpdated')) {
+      lastUpdated = DateTime.parse(map['lastUpdated'] as String);
+    } else {
+      lastUpdated = DateTime.now();
+    }
+
+    return BudgetConfig(
+      monthlyDeposit: deposit,
+      allocationsAmount: alloc,
+      lastUpdated: lastUpdated,
+    );
   }
 
   Future<void> setTransferCategory(String transferId, BudgetCategory category) async {
