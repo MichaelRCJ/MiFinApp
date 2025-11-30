@@ -22,7 +22,9 @@ class AuthService {
       PerformanceCache<String, Map<String, dynamic>>(maxSize: 50, ttl: Duration(minutes: 3));
   
   // Optimización: GoogleSignIn instance reutilizable
-  static final GoogleSignIn _googleSignIn = GoogleSignIn();
+  static final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email'],
+  );
 
   // Performance optimized: cached SharedPreferences access
   static Future<SharedPreferences> _getPrefs() async {
@@ -144,8 +146,7 @@ class AuthService {
       if (googleUser == null) return null;
       
       // Timeout más generoso para obtener tokens
-      final googleAuth = await googleUser.authentication
-          .timeout(const Duration(seconds: 10));
+      final googleAuth = await googleUser.authentication;
       
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
@@ -263,7 +264,7 @@ class AuthService {
     await _firebaseAuth.signOut();
     
     // Optimización: usar instancia reutilizable
-    if (await _googleSignIn.isSignedIn()) {
+    if (_googleSignIn.currentUser != null) {
       await _googleSignIn.signOut();
     }
   }

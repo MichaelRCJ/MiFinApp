@@ -44,7 +44,11 @@ class _BudgetTabState extends State<BudgetTab> {
       final v = double.tryParse(_amount[c]!.text.trim()) ?? 0;
       alloc[c] = v;
     }
-    await budgetStore.saveConfig(BudgetConfig(monthlyDeposit: deposit, allocationsAmount: alloc));
+    await budgetStore.saveConfig(BudgetConfig(
+      monthlyDeposit: deposit, 
+      allocationsAmount: alloc,
+      lastUpdated: DateTime.now(),
+    ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Presupuesto guardado')));
   }

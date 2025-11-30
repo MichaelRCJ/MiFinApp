@@ -6,7 +6,7 @@ import '../../models/budget_rule.dart';
 import '../../models/expense.dart';
 import '../../services/service_locator.dart';
 import '../../storage/expense_store.dart';
-import '../../utils/debouncer.dart';
+import '../home/home_screen.dart';
 
 class BudgetTab extends StatefulWidget {
   const BudgetTab({super.key});
@@ -21,10 +21,11 @@ class _BudgetTabState extends State<BudgetTab> {
   final Map<BudgetCategory, TextEditingController> _amount = {
     for (final c in BudgetCategory.values) c: TextEditingController()
   };
-  final Map<BudgetCategory, FocusNode> _focusNodes = {};
+  final Map<BudgetCategory, FocusNode> _focusNodes = {
+    for (final c in BudgetCategory.values) c: FocusNode()
+  };
   final _formKey = GlobalKey<FormState>();
   final _currencyFormat = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
-  final Debouncer _debouncer = Debouncer();
   
   // Estado de la aplicación
   bool _isLoading = true;
@@ -39,9 +40,6 @@ class _BudgetTabState extends State<BudgetTab> {
   
   // Lista de reglas de presupuesto
   List<BudgetRule> _budgetRules = [];
-  
-  // Para controlar si se debe mostrar confirmación
-  // final Map<BudgetCategory, bool> _pendingExceededConfirmation = {};
   
   // Parsear cantidad de texto a double
   double _parseAmount(String value) {
@@ -63,11 +61,6 @@ class _BudgetTabState extends State<BudgetTab> {
   // Verificar si se ha excedido el presupuesto
   bool get _isOverBudget => _totalAllocated > _monthlyDeposit;
   
-  // Método para obtener o crear un FocusNode
-  FocusNode _getOrCreateFocusNode(BudgetCategory category) {
-    return _focusNodes.putIfAbsent(category, () => FocusNode());
-  }
-  
   // Inicializar controladores
   void _initializeControllers() {
     // Los controladores ya están inicializados en la declaración
@@ -78,6 +71,21 @@ class _BudgetTabState extends State<BudgetTab> {
   void initState() {
     super.initState();
     _initializeControllers();
+    
+    // Agregar listeners a los controladores de cantidad
+    for (final category in BudgetCategory.values) {
+      _amount[category]!.addListener(() {
+        // Solo actualizar si el widget está montado, no está enfocado y ha pasado un tiempo
+        if (mounted && !_focusNodes[category]!.hasFocus) {
+          // Usar un pequeño delay para evitar múltiples actualizaciones rápidas
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted && !_focusNodes[category]!.hasFocus) {
+              setState(() {});
+            }
+          });
+        }
+      });
+    }
     
     // Escuchar cambios en gastos
     expenseNotifier.addListener(_onExpensesChanged);
@@ -91,12 +99,54 @@ class _BudgetTabState extends State<BudgetTab> {
     });
   }
   
+  // Sobreescribir didChangeDependencies para recargar cuando se vuelve a la pantalla
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Recargar datos cada vez que la pantalla se vuelve activa
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isLoading) {
+        _loadBudget();
+      }
+    });
+  }
+  
+  // Sobreescribir didUpdateWidget para recargar cuando la pantalla se actualiza
+  @override
+  void didUpdateWidget(BudgetTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Recargar datos cuando la pantalla se actualiza
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadBudget();
+    });
+  }
+  
+  // Método para recargar manualmente los datos
+  Future<void> _refreshData() async {
+    try {
+      setState(() => _isLoading = true);
+      // Cargar presupuesto primero, luego gastos y reglas
+      await _loadBudget();
+      await Future.wait([
+        _loadExpenses(),
+        _checkBudgetRules(),
+      ]);
+    } catch (e) {
+      _showError('Error al recargar los datos: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+  
   // Inicializar todos los datos necesarios
   Future<void> _initializeData() async {
     try {
       setState(() => _isLoading = true);
+      // Cargar presupuesto primero, luego gastos y reglas
+      await _loadBudget();
       await Future.wait([
-        _loadBudget(),
         _loadExpenses(),
         _checkBudgetRules(),
       ]);
@@ -201,12 +251,11 @@ class _BudgetTabState extends State<BudgetTab> {
     expenseNotifier.removeListener(_onExpensesChanged);
     budgetStore.removeListener(_onBudgetChanged);
     _deposit.dispose();
-    _debouncer.dispose();
     _updateController.close();
     
     for (final c in BudgetCategory.values) {
       _amount[c]!.dispose();
-      _focusNodes[c]?.dispose();
+      _focusNodes[c]!.dispose();
     }
     
     super.dispose();
@@ -230,10 +279,10 @@ class _BudgetTabState extends State<BudgetTab> {
           final totalGastado = gastosCategoria.fold<double>(0, (sum, e) => sum + e.monto);
           final presupuestoActual = _parseAmount(_amount[category]!.text);
           
-          // Si hay gastos no presupuestados, actualizar el presupuesto automáticamente
+          // Si hay gastos no presupuestados, actualizar el presupuesto automáticamente con validación
           if (totalGastado > 0 && (presupuestoActual == 0 || totalGastado > presupuestoActual)) {
-            _amount[category]!.text = _formatCurrency(totalGastado);
-            _presupuestoExtendido[category] = true;
+            debugPrint('💰 Detectados gastos en ${category.name}: \$${totalGastado.toStringAsFixed(2)}');
+            await _validateAndUpdateBudget(category, totalGastado);
           } else if (totalGastado <= presupuestoActual) {
             _presupuestoExtendido[category] = false;
           }
@@ -241,10 +290,19 @@ class _BudgetTabState extends State<BudgetTab> {
       }
       
       if (mounted) {
-        setState(() {});
-        _updateController.add(null);
-        // Revisar reglas después de cambios
-        await _checkBudgetRules();
+        // Usar un delay para evitar actualizaciones múltiples y parpadeos
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (mounted) {
+            setState(() {});
+            _updateController.add(null);
+          }
+        });
+        // Revisar reglas después de cambios (en background para no bloquear UI)
+        Future.microtask(() async {
+          if (mounted) {
+            await _checkBudgetRules();
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -266,9 +324,18 @@ class _BudgetTabState extends State<BudgetTab> {
         setState(() {
           debugPrint('✅ Budget UI updated');
         });
-        _updateController.add(null);
-        // Revisar reglas después de cambios
-        await _checkBudgetRules();
+        // Usar delay para evitar parpadeos
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted) {
+            _updateController.add(null);
+          }
+        });
+        // Revisar reglas después de cambios (en background)
+        Future.microtask(() async {
+          if (mounted) {
+            await _checkBudgetRules();
+          }
+        });
       }
     } catch (e) {
       debugPrint('❌ Error al actualizar presupuesto: $e');
@@ -281,18 +348,34 @@ class _BudgetTabState extends State<BudgetTab> {
   // Cargar la configuración del presupuesto
   Future<void> _loadBudget() async {
     try {
+      debugPrint('🔄 Loading budget config...');
       final cfg = await budgetStore.loadConfig();
       debugPrint('💰 Budget loaded: ${cfg?.monthlyDeposit}');
+      
       if (!mounted) return;
       
-      setState(() {
-        _deposit.text = _formatCurrency(cfg?.monthlyDeposit ?? 0.0);
-        for (final category in BudgetCategory.values) {
-          final amount = cfg?.allocationsAmount[category] ?? 0.0;
-          _amount[category]!.text = _formatCurrency(amount);
-          debugPrint('📊 Category ${category.name}: $amount');
-        }
-      });
+      if (cfg != null) {
+        setState(() {
+          _deposit.text = _formatCurrency(cfg.monthlyDeposit);
+          debugPrint('💰 Set monthly deposit: ${cfg.monthlyDeposit}');
+          
+          for (final category in BudgetCategory.values) {
+            final amount = cfg.allocationAmount(category);
+            _amount[category]!.text = _formatCurrency(amount);
+            debugPrint('📊 Set ${category.name}: $amount (from saved config)');
+          }
+        });
+        debugPrint('✅ Budget UI updated successfully');
+      } else {
+        debugPrint('⚠️ No budget config found, using defaults');
+        setState(() {
+          _deposit.text = _formatCurrency(0.0);
+          for (final category in BudgetCategory.values) {
+            _amount[category]!.text = _formatCurrency(0.0);
+            debugPrint('📊 Set ${category.name}: 0.0 (default)');
+          }
+        });
+      }
     } catch (e) {
       debugPrint('❌ Error loading budget: $e');
       if (mounted) {
@@ -312,6 +395,7 @@ class _BudgetTabState extends State<BudgetTab> {
       if (!mounted) return;
       
       // Verificar cada categoría y actualizar presupuestos si es necesario
+      // SOLO si no hay un presupuesto configurado explícitamente
       for (final category in BudgetCategory.values) {
         final expenseCategory = _mapToExpenseCategory(category);
         final gastosCategoria = expenses
@@ -322,9 +406,11 @@ class _BudgetTabState extends State<BudgetTab> {
           final totalGastado = gastosCategoria.fold<double>(0, (sum, e) => sum + e.monto);
           final presupuestoActual = _parseAmount(_amount[category]!.text);
           
-          // Si hay gastos no presupuestados, actualizar el presupuesto
-          if (totalGastado > 0 && (presupuestoActual == 0 || totalGastado > presupuestoActual)) {
-            _amount[category]!.text = _formatCurrency(totalGastado);
+          // SOLO actualizar si el presupuesto actual es 0 (no configurado)
+          // y hay gastos reales que lo justifiquen, pero con validación
+          if (presupuestoActual == 0 && totalGastado > 0) {
+            debugPrint('💰 Auto-setting ${category.name} from $presupuestoActual to $totalGastado based on expenses');
+            await _validateAndUpdateBudget(category, totalGastado);
           }
         }
       }
@@ -355,37 +441,230 @@ class _BudgetTabState extends State<BudgetTab> {
     };
   }
 
+  // Mostrar diálogo de confirmación para guardar presupuesto
+  Future<bool> _showSaveConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.save, color: Colors.blue[700]),
+            const SizedBox(width: 8),
+            const Text('Guardar Presupuesto'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '¿Estás seguro de que quieres guardar este presupuesto?',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Saldo total: \$${_monthlyDeposit.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Total asignado: \$${_totalAllocated.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  if (_isOverBudget) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ Excedente: \$${(_totalAllocated - _monthlyDeposit).toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Una vez guardado, este presupuesto se aplicará a todos tus gastos.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sí, guardar'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<bool> _save() async {
-    if (!_formKey.currentState!.validate()) return false;
+    debugPrint('💾 _save() method called');
     
-    if (_monthlyDeposit <= 0) {
+    if (!_formKey.currentState!.validate()) {
+      debugPrint('❌ Form validation failed');
+      return false;
+    }
+    
+    final monthlyDeposit = _monthlyDeposit;
+    debugPrint('💾 Saving budget - Monthly deposit: $monthlyDeposit');
+    
+    if (monthlyDeposit <= 0) {
+      debugPrint('❌ Monthly deposit is <= 0: $monthlyDeposit');
       _showError('El saldo debe ser mayor a cero. Registra ingresos para aumentar tu saldo.');
       return false;
     }
+    
+    // Mostrar diálogo de confirmación primero
+    debugPrint('💾 Showing confirmation dialog...');
+    final confirmed = await _showSaveConfirmationDialog();
+    if (!confirmed) {
+      debugPrint('❌ User cancelled budget save');
+      return false;
+    }
+    debugPrint('✅ User confirmed budget save');
+    
     try {
+      // Forzar actualización del estado antes de guardar
+      for (final category in BudgetCategory.values) {
+        _amount[category]!.notifyListeners();
+      }
+      
+      // Validar que el depósito mensual sea válido
+      final monthlyDeposit = _monthlyDeposit;
+      if (monthlyDeposit.isNaN || monthlyDeposit.isInfinite || monthlyDeposit < 0) {
+        debugPrint('❌ Invalid monthly deposit: $monthlyDeposit');
+        _showError('El saldo mensual no es válido. Por favor, verifica los ingresos registrados.');
+        return false;
+      }
+      
+      // Crear configuración con los valores actuales de los controladores
+      final allocations = <BudgetCategory, double>{};
+      final categories = BudgetCategory.values;
+      
+      if (categories == null || categories.isEmpty) {
+        debugPrint('❌ BudgetCategory.values is null or empty');
+        _showError('Error al acceder a las categorías de presupuesto');
+        return false;
+      }
+      
+      for (final category in categories) {
+        final controller = _amount[category];
+        if (controller == null) {
+          debugPrint('❌ Controller for category ${category.name} is null');
+          continue;
+        }
+        
+        final controllerText = controller.text ?? '0';
+        final amount = _parseAmount(controllerText);
+        allocations[category] = amount;
+        debugPrint('📊 Category ${category.name}: \$${amount.toStringAsFixed(2)} (raw text: "$controllerText")');
+      }
+      
+      debugPrint('💾 Creating BudgetConfig with monthlyDeposit: $monthlyDeposit');
       final config = BudgetConfig(
-        monthlyDeposit: _monthlyDeposit,
-        allocationsAmount: {
-          for (final category in BudgetCategory.values)
-            category: _parseAmount(_amount[category]!.text),
-        },
+        monthlyDeposit: monthlyDeposit,
+        allocationsAmount: allocations,
         lastUpdated: DateTime.now(),
       );
       
+      debugPrint('💾 Saving budget config...');
       await budgetStore.saveConfig(config);
+      debugPrint('💾 Budget config saved to storage');
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Presupuesto guardado exitosamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        // Revisar reglas después de guardar
-        await _checkBudgetRules();
+      // Verificar que se guardó correctamente
+      debugPrint('🔄 Loading config back to verify...');
+      final savedConfig = await budgetStore.loadConfig();
+      if (savedConfig != null) {
+        debugPrint('✅ Budget saved successfully');
+        debugPrint('💾 Saved monthly deposit: ${savedConfig.monthlyDeposit}');
+        
+        // Construir mensaje detallado de confirmación
+        String savedCategories = '';
+        for (final category in BudgetCategory.values) {
+          final amount = savedConfig.allocationAmount(category);
+          debugPrint('📊 Saved ${category.name}: \$${amount.toStringAsFixed(2)}');
+          if (amount > 0) {
+            savedCategories += '\n• ${_getBudgetCategoryName(category)}: \$${amount.toStringAsFixed(2)}';
+          }
+        }
+        
+        // Verificación adicional: comparar valores guardados vs valores actuales
+        bool allMatch = true;
+        for (final category in BudgetCategory.values) {
+          final currentAmount = _parseAmount(_amount[category]!.text);
+          final savedAmount = savedConfig.allocationAmount(category);
+          if ((currentAmount - savedAmount).abs() > 0.01) {
+            debugPrint('❌ Mismatch for ${category.name}: current=$currentAmount, saved=$savedAmount');
+            allMatch = false;
+          }
+        }
+        
+        if (allMatch) {
+          debugPrint('✅ All values match between controllers and saved config');
+        } else {
+          debugPrint('❌ Some values don\'t match between controllers and saved config');
+        }
+        
+        if (mounted) {
+          debugPrint('🎉 Showing success SnackBar...');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '✅ Presupuesto guardado exitosamente',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  if (savedCategories.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text('Categorías actualizadas:$savedCategories'),
+                  ],
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          debugPrint('✅ SnackBar shown successfully');
+          // Revisar reglas después de guardar
+          await _checkBudgetRules();
+        } else {
+          debugPrint('❌ Widget not mounted, cannot show SnackBar');
+        }
+      } else {
+        debugPrint('❌ Failed to load saved config');
+        _showError('Error al verificar el guardado del presupuesto');
+        return false;
       }
+      
       return true;
     } catch (e) {
+      debugPrint('❌ Error saving budget: $e');
       if (mounted) {
         _showError('Error al guardar el presupuesto: $e');
       }
@@ -400,6 +679,249 @@ class _BudgetTabState extends State<BudgetTab> {
         backgroundColor: Colors.red,
       ),
     );
+  }
+
+  // Validar y mostrar diálogo antes de actualizar presupuesto automáticamente
+  Future<bool> _validateAndUpdateBudget(BudgetCategory category, double newAmount) async {
+    final currentTotal = _totalAllocated;
+    final currentCategoryAmount = _parseAmount(_amount[category]!.text);
+    final otherCategoriesTotal = currentTotal - currentCategoryAmount;
+    final newTotal = otherCategoriesTotal + newAmount;
+    final monthlyDeposit = _monthlyDeposit;
+    
+    debugPrint('🔍 Validando actualización automática: $newAmount (total: $newTotal, disponible: $monthlyDeposit)');
+    
+    if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
+      // Mostrar diálogo de confirmación para presupuesto extendido
+      final confirmed = await _showBudgetExtensionDialog(category, newAmount, monthlyDeposit);
+      if (confirmed) {
+        _amount[category]!.text = _formatCurrency(newAmount);
+        _presupuestoExtendido[category] = true;
+        debugPrint('✅ Presupuesto extendido confirmado para ${category.name}: $newAmount');
+        return true;
+      } else {
+        debugPrint('❌ Usuario canceló extensión de presupuesto para ${category.name}');
+        return false;
+      }
+    } else {
+      // Hay saldo disponible, actualizar directamente
+      _amount[category]!.text = _formatCurrency(newAmount);
+      _presupuestoExtendido[category] = false;
+      debugPrint('✅ Presupuesto actualizado para ${category.name}: $newAmount');
+      return true;
+    }
+  }
+
+  // Mostrar diálogo de extensión de presupuesto
+  Future<bool> _showBudgetExtensionDialog(BudgetCategory category, double requestedAmount, double availableAmount) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.account_balance_wallet_outlined, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('Extender Presupuesto'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Se detectaron gastos de \$${requestedAmount.toStringAsFixed(2)} en ${_getBudgetCategoryName(category)}.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Saldo disponible:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${availableAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Monto requerido:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${requestedAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Excedente:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${(requestedAmount - availableAmount).toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '¿Deseas extender el presupuesto para esta categoría?',
+              style: TextStyle(fontSize: 14),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.check_circle),
+            label: const Text('Extender Presupuesto'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+  Future<void> _showInsufficientBalanceDialog(double requestedAmount, double availableAmount) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false, // No permitir cerrar tocando afuera
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.account_balance_wallet_outlined, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('Saldo Insuficiente'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'No puedes asignar \$${requestedAmount.toStringAsFixed(2)} a esta categoría.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Saldo disponible:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${availableAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Monto solicitado:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${requestedAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Faltante:', style: TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '\$${(requestedAmount - availableAmount).toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Para aumentar tu saldo, registra un nuevo ingreso.',
+              style: TextStyle(fontSize: 14),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.add_circle_outline),
+            label: const Text('Ir a Ingresos'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // Si el usuario aceptó, navegar a la pestaña de ingresos
+    if (result == true) {
+      _navigateToIncomes();
+    }
+  }
+
+  // Navegar a la pestaña de ingresos
+  void _navigateToIncomes() {
+    debugPrint('🚀 Navegando a ingresos...');
+    try {
+      // Ir directamente a la pestaña de ingresos usando el widget directamente
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) {
+            debugPrint('🏠 Creando HomeScreen con initialIndex: 1');
+            return const HomeScreen(initialIndex: 1);
+          },
+        ),
+        (route) => false,
+      );
+      debugPrint('✅ Navegación a ingresos ejecutada');
+    } catch (e) {
+      debugPrint('❌ Error navegando a ingresos: $e');
+      // Fallback: ir a home normal
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+    }
   }
 
   // Construir tarjeta de regla de presupuesto
@@ -555,17 +1077,26 @@ class _BudgetTabState extends State<BudgetTab> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gestión de Presupuesto'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+            tooltip: 'Recargar datos',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<void>(
               stream: _updateController.stream,
               builder: (context, snapshot) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                return Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                       // Saldo disponible
                       Card(
                         child: Padding(
@@ -707,6 +1238,7 @@ class _BudgetTabState extends State<BudgetTab> {
                       ),
                     ],
                   ),
+                  ),
                 );
               },
             ),
@@ -812,19 +1344,33 @@ class _BudgetTabState extends State<BudgetTab> {
         IconData statusIcon;
         
         if (isOverBudget) {
-          // ROJO: Excedido
+          // ROJO: Excedido o Presupuesto Extendido
           cardColor = Colors.red[50]!;
           borderColor = Colors.red[400]!;
           statusColor = Colors.red[700]!;
-          statusText = 'EXCEDIDO';
-          statusIcon = Icons.dangerous;
-        } else if (percentage >= 80) {
-          // NARANJA: Cercano al límite
-          cardColor = Colors.orange[50]!;
-          borderColor = Colors.orange[400]!;
-          statusColor = Colors.orange[700]!;
-          statusText = 'CASI LÍMITE';
+          
+          // Verificar si es presupuesto extendido
+          if (_presupuestoExtendido[category] == true) {
+            statusText = 'PRESUPUESTO EXTENDIDO';
+            statusIcon = Icons.add_circle_outline;
+          } else {
+            statusText = 'EXCEDIDO';
+            statusIcon = Icons.dangerous;
+          }
+        } else if (percentage >= 95) {
+          // ROJO: Casi en el límite (95% o más)
+          cardColor = Colors.red[50]!;
+          borderColor = Colors.red[400]!;
+          statusColor = Colors.red[700]!;
+          statusText = 'AVISO CASI EN EL LÍMITE';
           statusIcon = Icons.warning;
+        } else if (percentage >= 50) {
+          // NARANJA/TOMATE: Mitad del presupuesto (50% o más)
+          cardColor = Colors.deepOrange[50]!;
+          borderColor = Colors.deepOrange[400]!;
+          statusColor = Colors.deepOrange[700]!;
+          statusText = 'MITAD USADO';
+          statusIcon = Icons.trending_up;
         } else {
           // VERDE: Bien
           cardColor = Colors.green[50]!;
@@ -907,7 +1453,8 @@ class _BudgetTabState extends State<BudgetTab> {
                     child: Container(
                       decoration: BoxDecoration(
                         color: isOverBudget ? Colors.red[700] : 
-                               percentage >= 80 ? Colors.orange[700] : Colors.green[700],
+                               percentage >= 95 ? Colors.red[700] :
+                               percentage >= 50 ? Colors.deepOrange[700] : Colors.green[700],
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -975,8 +1522,30 @@ class _BudgetTabState extends State<BudgetTab> {
                 // Campo de entrada de presupuesto
                 TextFormField(
                   controller: _amount[category],
-                  focusNode: _getOrCreateFocusNode(category),
+                  focusNode: _focusNodes[category],
                   keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa un monto';
+                    }
+                    final amount = _parseAmount(value);
+                    if (amount < 0) {
+                      return 'El monto no puede ser negativo';
+                    }
+                    
+                    // Validar que no exceda el saldo disponible
+                    final currentTotal = _totalAllocated;
+                    final currentCategoryAmount = _parseAmount(_amount[category]!.text);
+                    final otherCategoriesTotal = currentTotal - currentCategoryAmount;
+                    final newTotal = otherCategoriesTotal + amount;
+                    final monthlyDeposit = _monthlyDeposit;
+                    
+                    if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
+                      return 'Saldo insuficiente. Disponible: \$${monthlyDeposit.toStringAsFixed(2)}';
+                    }
+                    
+                    return null;
+                  },
                   decoration: InputDecoration(
                     labelText: 'Ajustar presupuesto',
                     prefixText: '\$ ',
@@ -997,11 +1566,35 @@ class _BudgetTabState extends State<BudgetTab> {
                     fontWeight: FontWeight.bold,
                   ),
                   onChanged: (value) {
-                    // Actualizar el estado cuando cambia el presupuesto
-                    _debouncer.run(() {
+                    // No hacer nada aquí, el listener del controlador manejará las actualizaciones
+                  },
+                  onEditingComplete: () {
+                    // Forzar actualización cuando se completa la edición
+                    if (mounted) {
                       setState(() {});
-                      _checkBudgetRules(); // Revisar reglas después del cambio
-                    });
+                    }
+                  },
+                  onFieldSubmitted: (value) {
+                    // Verificar el saldo cuando se envía el campo
+                    if (value.isNotEmpty) {
+                      final amount = _parseAmount(value);
+                      final currentTotal = _totalAllocated;
+                      final currentCategoryAmount = _parseAmount(_amount[category]!.text);
+                      final otherCategoriesTotal = currentTotal - currentCategoryAmount;
+                      final newTotal = otherCategoriesTotal + amount;
+                      final monthlyDeposit = _monthlyDeposit;
+                      
+                      if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
+                        // Mostrar diálogo de saldo insuficiente
+                        _showInsufficientBalanceDialog(amount, monthlyDeposit);
+                        return;
+                      }
+                    }
+                    
+                    // Forzar actualización cuando se envía el campo
+                    if (mounted) {
+                      setState(() {});
+                    }
                   },
                 ),
               ],

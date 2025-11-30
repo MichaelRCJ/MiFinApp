@@ -315,11 +315,6 @@ class _InicioSesionScreenState extends State<InicioSesionScreen> {
                       onPressed: _loading ? null : _onGoogleLogin,
                       icon: const Icon(Icons.g_mobiledata, size: 32),
                     ),
-                    IconButton(
-                      onPressed: () => ScaffoldMessenger.of(context)
-                          .showSnackBar(const SnackBar(content: Text('Login con Facebook no implementado'))),
-                      icon: const Icon(Icons.facebook, size: 24),
-                    ),
                   ],
                 ),
               ],

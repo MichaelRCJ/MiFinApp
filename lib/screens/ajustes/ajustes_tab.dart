@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/service_locator.dart';
+import '../../services/notification_service.dart';
 
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key});
@@ -11,11 +12,42 @@ class SettingsTab extends StatefulWidget {
 
 class _SettingsTabState extends State<SettingsTab> {
   final TextEditingController _days = TextEditingController(text: '2');
+  bool _notificationsEnabled = false;
+  String _notificationStatus = 'Verificando...';
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Establecer contexto para el servicio de notificaciones
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        notificationService.setContext(context);
+        _initializeNotifications();
+      }
+    });
+  }
+
+  Future<void> _initializeNotifications() async {
+    try {
+      await notificationService.initialize();
+      await _updateNotificationStatus();
+    } catch (e) {
+      debugPrint('❌ Error inicializando notificaciones: $e');
+      setState(() {
+        _notificationStatus = 'Error al inicializar';
+      });
+    }
+  }
+
+  Future<void> _updateNotificationStatus() async {
+    final status = await notificationService.getNotificationStatus();
+    final granted = await notificationService.arePermissionsGranted();
+    setState(() {
+      _notificationStatus = status;
+      _notificationsEnabled = granted;
+    });
   }
 
   Future<void> _load() async {
@@ -24,14 +56,127 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   Future<void> _save() async {
-    final v = int.tryParse(_days.text.trim());
-    if (v == null || v <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Días inválidos')));
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final v = int.tryParse(_days.text.trim());
+      if (v == null || v <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ Por favor, ingresa un número válido de días'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Guardar configuración
+      await settingsStore.save(reminderDays: v);
+
+      // Si las notificaciones están habilitadas, programarlas
+      if (_notificationsEnabled) {
+        await notificationService.scheduleExpenseReminder(v);
+        debugPrint('📅 Recordatorios programados cada $v días');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('✅ Ajustes guardados${_notificationsEnabled ? ' y notificaciones programadas' : ''}'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error guardando ajustes: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error al guardar ajustes: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+  try {
+    await notificationService.initialize();
+    await _updateNotificationStatus();
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.info, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(_notificationsEnabled ? '✅ Permisos concedidos' : '❌ Permisos denegados'),
+            ],
+          ),
+          backgroundColor: _notificationsEnabled ? Colors.green : Colors.orange,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('❌ Error solicitando permisos: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+  Future<void> _testNotification() async {
+    if (!_notificationsEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Habilita las notificaciones primero'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
-    await settingsStore.save(reminderDays: v);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ajustes guardados')));
+
+    try {
+      await notificationService.showTestNotification();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🧪 Notificación de prueba enviada'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error enviando notificación de prueba: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -43,70 +188,238 @@ class _SettingsTabState extends State<SettingsTab> {
           padding: const EdgeInsets.all(16),
           children: [
             Card(
+              elevation: 2,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Recordatorios para registrar gastos', style: TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Expanded(child: Text('Frecuencia (días)')),
-                        SizedBox(
-                          width: 96,
+                        Icon(Icons.notifications_active, color: Theme.of(context).primaryColor),
+                        const SizedBox(width: 8),
+                        const Text('Recordatorios para registrar gastos', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Recibe notificaciones periódicas para recordar registrar tus gastos y mantener tu presupuesto bajo control.'),
+                    const SizedBox(height: 16),
+                    
+                    // Estado de notificaciones
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _notificationsEnabled ? Colors.green[50] : Colors.orange[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _notificationsEnabled ? Colors.green[200]! : Colors.orange[200]!,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _notificationsEnabled ? Icons.check_circle : Icons.warning,
+                            color: _notificationsEnabled ? Colors.green : Colors.orange,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Estado: $_notificationStatus',
+                              style: TextStyle(
+                                color: _notificationsEnabled ? Colors.green[700] : Colors.orange[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: _updateNotificationStatus,
+                            icon: const Icon(Icons.refresh),
+                            tooltip: 'Actualizar estado',
+                          ),
+                          if (!_notificationsEnabled)
+                            IconButton(
+                              onPressed: _requestPermissions,
+                              icon: const Icon(Icons.notifications_active),
+                              tooltip: 'Solicitar permisos',
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Configuración de frecuencia
+                    Row(
+                      children: [
+                        const Expanded(
+                          flex: 2,
+                          child: Text('Frecuencia (días):', style: TextStyle(fontWeight: FontWeight.w500)),
+                        ),
+                        Expanded(
+                          flex: 1,
                           child: TextField(
                             controller: _days,
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(border: OutlineInputBorder()),
+                            textAlign: TextAlign.center,
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Theme.of(context).primaryColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Theme.of(context).primaryColor, width: 2),
+                              ),
+                              hintText: '2',
+                              hintStyle: const TextStyle(color: Colors.grey),
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton(onPressed: _save, child: const Text('Guardar')),
-                    )
+                    const SizedBox(height: 16),
+                    
+                    // Botones de acción
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoading ? null : _save,
+                            icon: _isLoading 
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.save),
+                            label: Text(_isLoading ? 'Guardando...' : 'Guardar configuración'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: _testNotification,
+                          icon: const Icon(Icons.notifications),
+                          label: const Text('Probar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Las notificaciones se enviarán todos los días a las 10:00 AM',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 12),
             Card(
+              elevation: 2,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Interfaz', style: TextStyle(fontWeight: FontWeight.w700)),
+                    Row(
+                      children: [
+                        Icon(Icons.palette, color: Theme.of(context).primaryColor),
+                        const SizedBox(width: 8),
+                        const Text('Interfaz', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    const Text('Color principal de la aplicación'),
+                    const Text('Personaliza el color principal de la aplicación según tu preferencia.'),
+                    const SizedBox(height: 16),
+                    
+                    // Colores predefinidos
+                    const Text('Colores predefinidos:', style: TextStyle(fontWeight: FontWeight.w500)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _presetColors.map((c) => _ColorChoice(color: c, selected: themeController.seedColor.value == c.value, onTap: () => themeController.setSeed(c))).toList(),
+                      children: _presetColors.map((c) => _ColorChoice(
+                        color: c, 
+                        selected: themeController.seedColor.value == c.value, 
+                        onTap: () async {
+                          await themeController.setSeed(c);
+                          setState(() {}); // Actualizar para reflejar el cambio
+                        }
+                      )).toList(),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
+                    
+                    // Selector personalizado
                     Row(
                       children: [
-                        const Text('Personalizado:'),
+                        const Text('Personalizado:', style: TextStyle(fontWeight: FontWeight.w500)),
                         const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: () async {
-                            final picked = await showDialog<Color?>(
-                              context: context,
-                              builder: (ctx) => _SimpleColorPickerDialog(initial: themeController.seedColor),
-                            );
-                            if (picked != null) {
-                              await themeController.setSeed(picked);
-                            }
-                          },
-                          child: const Text('Elegir color'),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final picked = await showDialog<Color?>(
+                                context: context,
+                                builder: (ctx) => _SimpleColorPickerDialog(initial: themeController.seedColor),
+                              );
+                              if (picked != null) {
+                                await themeController.setSeed(picked);
+                                setState(() {}); // Actualizar para reflejar el cambio
+                              }
+                            },
+                            icon: const Icon(Icons.color_lens),
+                            label: const Text('Elegir color'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey[200],
+                              foregroundColor: Colors.black87,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
-                    )
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).primaryColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Theme.of(context).primaryColor, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'El color seleccionado se aplicará en toda la aplicación, incluyendo botones, barras y elementos interactivos.',
+                              style: TextStyle(
+                                color: Theme.of(context).primaryColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),

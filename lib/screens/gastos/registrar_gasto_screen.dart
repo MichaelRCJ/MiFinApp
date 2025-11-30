@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import '../../models/expense.dart';
 import '../../models/budget.dart';
 import '../../services/service_locator.dart';
-import '../../storage/budget_store.dart';
 import '../../services/auth_service.dart';
+import '../../storage/expense_store.dart';
+import '../../storage/budget_store.dart';
 
 class RegistrarGastoScreen extends StatefulWidget {
   static const String routeName = '/registrar-gasto';
@@ -40,7 +41,16 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
     if (!_formKey.currentState!.validate()) return;
     final monto = double.tryParse(_montoCtrl.text.trim()) ?? 0;
 
-    // Verificar si excede el presupuesto antes de guardar
+    // PRIMERO: Verificar si hay saldo total disponible
+    final totalBalanceCheck = await _checkTotalBalance(monto);
+    if (totalBalanceCheck != null) {
+      final shouldContinue = await _showInsufficientBalanceDialog(totalBalanceCheck);
+      if (shouldContinue != true) {
+        return; // Usuario canceló, no guardar el gasto
+      }
+    }
+
+    // SEGUNDO: Verificar si excede el presupuesto de la categoría
     final budgetExceeded = await _checkBudgetExceeded(_categoria, monto);
 
     // Si excede el presupuesto, mostrar diálogo de confirmación
@@ -64,6 +74,174 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
     await expenseStore.addExpense(expense);
     if (!mounted) return;
     Navigator.of(context).pop(true);
+  }
+
+  // Verificar si hay saldo total disponible para todos los gastos
+  Future<Map<String, dynamic>?> _checkTotalBalance(double monto) async {
+    try {
+      debugPrint('🔍 Checking total balance for amount: $monto');
+      
+      final budgetConfig = await budgetStore.loadConfig();
+      
+      if (budgetConfig == null) {
+        debugPrint('❌ No budget config found');
+        return null;
+      }
+
+      final totalBalance = budgetConfig.monthlyDeposit;
+      debugPrint('💰 Total monthly balance: $totalBalance');
+
+      // Obtener todos los gastos del mes actual
+      final allExpenses = await expenseStore.loadExpenses();
+      final now = DateTime.now();
+      final monthExpenses = allExpenses.where((e) => 
+        !e.esPresupuestado &&
+        e.fecha.year == now.year && 
+        e.fecha.month == now.month
+      ).toList();
+      
+      debugPrint('📋 Found ${monthExpenses.length} expenses this month');
+      
+      final currentSpent = monthExpenses.fold<double>(0, (sum, e) => sum + e.monto);
+      final newTotal = currentSpent + monto;
+      
+      debugPrint('💸 Current spent: $currentSpent, New total: $newTotal, Balance: $totalBalance');
+
+      if (newTotal > totalBalance) {
+        debugPrint('⚠️ INSUFFICIENT BALANCE! Showing dialog...');
+        return {
+          'balance': totalBalance,
+          'current': currentSpent,
+          'newExpense': monto,
+          'total': newTotal,
+          'shortfall': newTotal - totalBalance,
+        };
+      }
+
+      debugPrint('✅ Sufficient balance available');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error checking balance: $e');
+      return null;
+    }
+  }
+
+  // Mostrar diálogo de saldo insuficiente
+  Future<bool?> _showInsufficientBalanceDialog(Map<String, dynamic> balanceInfo) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.account_balance_wallet, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('¡Saldo Insuficiente!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No tienes suficiente saldo para registrar este gasto',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Saldo disponible:'),
+                      Text('\$${balanceInfo['balance'].toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Gastado actualmente:'),
+                      Text('\$${balanceInfo['current'].toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Este gasto:'),
+                      Text('\$${balanceInfo['newExpense'].toStringAsFixed(2)}', 
+                           style: const TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                  const Divider(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total después del gasto:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        '\$${balanceInfo['total'].toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Faltante:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        '-\$${balanceInfo['shortfall'].toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info, color: Colors.blue[700], size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Por favor ingresa nuevos ingresos para aumentar tu saldo disponible',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar gasto'),
+          ),
+        ],
+      ),
+    );
   }
 
   // Verificar si el gasto excede el presupuesto
@@ -148,9 +326,9 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.warning_amber, color: Colors.red[700]),
+            Icon(Icons.warning_amber, color: Colors.orange[700]),
             const SizedBox(width: 8),
-            const Text('¡Presupuesto Excedido!'),
+            const Text('¡Presupuesto de Categoría Excedido!'),
           ],
         ),
         content: Column(
@@ -158,23 +336,23 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Este gasto excede tu presupuesto en ${budgetInfo['category']}',
+              'Este gasto excede tu presupuesto asignado en ${budgetInfo['category']}',
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red[50],
+                color: Colors.orange[50],
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red[200]!),
+                border: Border.all(color: Colors.orange[200]!),
               ),
               child: Column(
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Presupuesto:'),
+                      const Text('Presupuesto de categoría:'),
                       Text('\$${budgetInfo['allocated'].toStringAsFixed(2)}'),
                     ],
                   ),
@@ -192,7 +370,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
                     children: [
                       const Text('Este gasto:'),
                       Text('\$${budgetInfo['newExpense'].toStringAsFixed(2)}', 
-                           style: const TextStyle(color: Colors.red)),
+                           style: const TextStyle(color: Colors.orange)),
                     ],
                   ),
                   const Divider(),
@@ -203,7 +381,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
                       Text(
                         '\$${budgetInfo['total'].toStringAsFixed(2)}',
                         style: const TextStyle(
-                          color: Colors.red,
+                          color: Colors.orange,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -217,7 +395,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
                       Text(
                         '+\$${budgetInfo['exceeded'].toStringAsFixed(2)}',
                         style: const TextStyle(
-                          color: Colors.red,
+                          color: Colors.orange,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -227,6 +405,27 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
               ),
             ),
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.yellow[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.yellow[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lightbulb, color: Colors.orange[700], size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'El presupuesto de esta categoría se actualizará automáticamente si continúas',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
             const Text('¿Deseas continuar de todas formas con este gasto?'),
           ],
         ),
@@ -237,7 +436,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Colors.orange,
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(context, true),

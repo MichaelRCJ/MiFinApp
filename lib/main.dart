@@ -9,12 +9,14 @@ import 'screens/auth/olvide_contrasena_screen.dart';
 import 'screens/gastos/registrar_gasto_screen.dart';
 import 'screens/common/particle_background.dart';
 import 'services/service_locator.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
   runApp(const ShinyApp());
 }
 
@@ -111,6 +113,7 @@ class _ShinyAppState extends State<ShinyApp> {
             SplashScreen.routeName: (_) => const SplashScreen(),
             InicioSesionScreen.routeName: (_) => const InicioSesionScreen(),
             HomeScreen.routeName: (_) => const HomeScreen(),
+            '/incomes': (_) => const HomeScreen(initialIndex: 1), // Directo a ingresos
             RegistroScreen.routeName: (_) => const RegistroScreen(),
             OlvideContrasenaScreen.routeName: (_) => const OlvideContrasenaScreen(),
             RegistrarGastoScreen.routeName: (_) => const RegistrarGastoScreen(),

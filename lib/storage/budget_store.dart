@@ -24,7 +24,17 @@ class BudgetStore extends ChangeNotifier {
       'allocationsAmount': config.allocationsAmount.map((k, v) => MapEntry(k.name, v)),
       'lastUpdated': config.lastUpdated.toIso8601String(),
     };
+    
+    debugPrint('💾 BudgetStore: Saving config for user: $username');
+    debugPrint('💾 BudgetStore: Key: $key');
+    debugPrint('💾 BudgetStore: Data: $data');
+    
     await prefs.setString(key, jsonEncode(data));
+    
+    // Verificar que se guardó
+    final saved = prefs.getString(key);
+    debugPrint('💾 BudgetStore: Saved data: $saved');
+    
     notifyListeners();
   }
 
@@ -32,7 +42,13 @@ class BudgetStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final username = await AuthService.getLastUsername() ?? _fallbackUser;
     final key = _configKeyFor(username);
+    
+    debugPrint('🔄 BudgetStore: Loading config for user: $username');
+    debugPrint('🔄 BudgetStore: Key: $key');
+    
     String? raw = prefs.getString(key);
+    debugPrint('🔄 BudgetStore: Raw data: $raw');
+    
     // Migración desde clave global
     if (raw == null) {
       final legacy = prefs.getString(_legacyConfigKey);
@@ -40,33 +56,44 @@ class BudgetStore extends ChangeNotifier {
         await prefs.setString(key, legacy);
         await prefs.remove(_legacyConfigKey);
         raw = legacy;
+        debugPrint('🔄 BudgetStore: Migrated legacy data');
       }
     }
-    if (raw == null) return null;
+    if (raw == null) {
+      debugPrint('🔄 BudgetStore: No data found');
+      return null;
+    }
+    
     final map = jsonDecode(raw) as Map<String, dynamic>;
+    debugPrint('🔄 BudgetStore: Parsed map: $map');
+    
     final deposit = (map['monthlyDeposit'] as num).toDouble();
     final alloc = <BudgetCategory, double>{};
 
     if (map.containsKey('allocationsAmount')) {
       // New schema: fixed amounts
       final allocMap = map['allocationsAmount'] as Map<String, dynamic>;
+      debugPrint('🔄 BudgetStore: Loading allocationsAmount: $allocMap');
       for (final entry in allocMap.entries) {
         final cat = BudgetCategory.values.firstWhere(
           (c) => c.name == entry.key,
           orElse: () => BudgetCategory.otros,
         );
         alloc[cat] = (entry.value as num).toDouble();
+        debugPrint('🔄 BudgetStore: Set ${cat.name} = ${alloc[cat]}');
       }
     } else {
       // Legacy schema: percentages
       final percentages = map['allocations'] as Map<String, dynamic>?;
       if (percentages != null) {
+        debugPrint('🔄 BudgetStore: Loading legacy percentages: $percentages');
         for (final entry in percentages.entries) {
           final cat = BudgetCategory.values.firstWhere(
             (c) => c.name == entry.key,
             orElse: () => BudgetCategory.otros,
           );
           alloc[cat] = deposit * ((entry.value as num).toDouble() / 100);
+          debugPrint('🔄 BudgetStore: Set ${cat.name} = ${alloc[cat]} (from percentage)');
         }
       }
     }
@@ -79,11 +106,14 @@ class BudgetStore extends ChangeNotifier {
       lastUpdated = DateTime.now();
     }
 
-    return BudgetConfig(
+    final result = BudgetConfig(
       monthlyDeposit: deposit,
       allocationsAmount: alloc,
       lastUpdated: lastUpdated,
     );
+    
+    debugPrint('🔄 BudgetStore: Loaded config with ${alloc.length} allocations');
+    return result;
   }
 
   Future<void> setTransferCategory(String transferId, BudgetCategory category) async {

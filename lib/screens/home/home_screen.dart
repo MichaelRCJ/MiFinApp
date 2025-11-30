@@ -5,17 +5,45 @@ import '../ingresos/ingresos_tab.dart';
 import '../analisis/analisis_tab.dart';
 import '../presupuesto/presupuesto_tab.dart';
 import '../ajustes/ajustes_tab.dart';
+import '../../services/service_locator.dart';
 
 class HomeScreen extends StatefulWidget {
   static const String routeName = '/home';
-  const HomeScreen({super.key});
+  final int initialIndex;
+  
+  const HomeScreen({super.key, this.initialIndex = 0});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _index = 0;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    debugPrint('🏠 HomeScreen: Inicializando con índice ${widget.initialIndex}');
+    
+    // Inicializar notificaciones después de que la UI está lista
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _initializeNotifications();
+      }
+    });
+  }
+  
+  Future<void> _initializeNotifications() async {
+    try {
+      // Establecer contexto para el servicio de notificaciones
+      notificationService.setContext(context);
+      await notificationService.initialize();
+      debugPrint('✅ Notificaciones inicializadas en HomeScreen');
+    } catch (e) {
+      debugPrint('❌ Error inicializando notificaciones: $e');
+    }
+  }
 
   List<Widget> get _tabs => [
     DashboardTab(onChangeTab: (i) => setState(() => _index = i)),
@@ -28,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('🏠 HomeScreen build: índice actual = $_index');
     return Scaffold(
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
@@ -35,7 +64,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
+        onTap: (i) => setState(() {
+          debugPrint('🏠 Cambiando a índice: $i');
+          _index = i;
+        }),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
           BottomNavigationBarItem(icon: Icon(Icons.attach_money_rounded), label: 'Ingresos'),
