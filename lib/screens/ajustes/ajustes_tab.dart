@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/service_locator.dart';
-import '../../services/notification_service.dart';
+import 'notification_time_config_screen.dart';
 
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key});
@@ -62,11 +62,11 @@ class _SettingsTabState extends State<SettingsTab> {
 
     try {
       final v = int.tryParse(_days.text.trim());
-      if (v == null || v <= 0) {
+      if (v == null || v <= 0 || v > 3) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('⚠️ Por favor, ingresa un número válido de días'),
+              content: Text('⚠️ Por favor, ingresa un número entre 1 y 3'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -74,27 +74,38 @@ class _SettingsTabState extends State<SettingsTab> {
         return;
       }
 
-      // Guardar configuración
-      await settingsStore.save(reminderDays: v);
-
-      // Si las notificaciones están habilitadas, programarlas
-      if (_notificationsEnabled) {
-        await notificationService.scheduleExpenseReminder(v);
-        debugPrint('📅 Recordatorios programados cada $v días');
+      if (!_notificationsEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ Por favor, activa las notificaciones primero'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
       }
 
-      if (mounted) {
+      // Navegar a la pantalla de configuración de horas
+      final result = await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => NotificationTimeConfigScreen(
+            numberOfNotifications: v,
+          ),
+        ),
+      );
+
+      if (result == true && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
               children: [
                 const Icon(Icons.check_circle, color: Colors.white),
                 const SizedBox(width: 8),
-                Text('✅ Ajustes guardados${_notificationsEnabled ? ' y notificaciones programadas' : ''}'),
+                Text('✅ $v notificación${v > 1 ? 'es' : ''} configurada${v > 1 ? 's' : ''}'),
               ],
             ),
             backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -202,7 +213,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    const Text('Recibe notificaciones periódicas para recordar registrar tus gastos y mantener tu presupuesto bajo control.'),
+                    const Text('Recibe recordatorios automáticos para registrar tus gastos. Te notificaremos periódicamente para ayudarte a mantener tu presupuesto bajo control.'),
                     const SizedBox(height: 16),
                     
                     // Estado de notificaciones
@@ -249,30 +260,71 @@ class _SettingsTabState extends State<SettingsTab> {
                     const SizedBox(height: 16),
                     
                     // Configuración de frecuencia
-                    Row(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Expanded(
-                          flex: 2,
-                          child: Text('Frecuencia (días):', style: TextStyle(fontWeight: FontWeight.w500)),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: TextField(
-                            controller: _days,
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            decoration: InputDecoration(
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Theme.of(context).primaryColor),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Theme.of(context).primaryColor, width: 2),
-                              ),
-                              hintText: '2',
-                              hintStyle: const TextStyle(color: Colors.grey),
+                        Row(
+                          children: [
+                            const Expanded(
+                              flex: 2,
+                              child: Text('¿Cuántas notificaciones al día quieres?', style: TextStyle(fontWeight: FontWeight.w500)),
                             ),
+                            Expanded(
+                              flex: 1,
+                              child: TextField(
+                                controller: _days,
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(color: Theme.of(context).primaryColor),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(color: Theme.of(context).primaryColor, width: 2),
+                                  ),
+                                  hintText: '1',
+                                  hintStyle: const TextStyle(color: Colors.grey),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.blue[200]!),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.info_outline, color: Colors.blue[700], size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Elige cuántas notificaciones quieres recibir cada día:',
+                                      style: TextStyle(
+                                        color: Colors.blue[700],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text('• Presiona 1 = una notificación al día (elige la hora)', style: TextStyle(color: Colors.blue[700], fontSize: 11)),
+                              Text('• Presiona 2 = dos notificaciones al día (elige las horas)', style: TextStyle(color: Colors.blue[700], fontSize: 11)),
+                              Text('• Presiona 3 = tres notificaciones al día (elige las horas)', style: TextStyle(color: Colors.blue[700], fontSize: 11)),
+                              const SizedBox(height: 4),
+                              Text('⏰ Después de guardar, podrás configurar las horas exactas', style: TextStyle(color: Colors.blue[600], fontSize: 11, fontWeight: FontWeight.w500)),
+                            ],
                           ),
                         ),
                       ],

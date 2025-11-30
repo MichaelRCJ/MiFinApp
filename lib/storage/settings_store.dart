@@ -10,7 +10,7 @@ class SettingsStore {
 
   String _keyFor(String username) => 'settings_${username}_v1';
 
-  Future<void> save({required int reminderDays}) async {
+  Future<void> save({required int reminderDays, List<String>? notificationTimes}) async {
     final prefs = await SharedPreferences.getInstance();
     final username = await AuthService.getLastUsername() ?? _fallbackUser;
     final key = _keyFor(username);
@@ -25,6 +25,9 @@ class SettingsStore {
       }
     }
     map['reminderDays'] = reminderDays;
+    if (notificationTimes != null) {
+      map['notificationTimes'] = notificationTimes;
+    }
     await prefs.setString(key, jsonEncode(map));
   }
 
@@ -42,9 +45,20 @@ class SettingsStore {
         raw = legacy;
       }
     }
-    if (raw == null) return 2; // default: cada 2 días
+    if (raw == null) return 1; // default: 1 notificación al día
     final map = jsonDecode(raw) as Map<String, dynamic>;
-    return (map['reminderDays'] as num?)?.toInt() ?? 2;
+    return (map['reminderDays'] as num?)?.toInt() ?? 1;
+  }
+
+  Future<List<String>> loadNotificationTimes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final username = await AuthService.getLastUsername() ?? _fallbackUser;
+    final key = _keyFor(username);
+    final raw = prefs.getString(key);
+    if (raw == null) return ['10:00']; // default: una notificación a las 10 AM
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    final times = map['notificationTimes'] as List<dynamic>?;
+    return times?.map((e) => e.toString()).toList() ?? ['10:00'];
   }
 
   Future<int> loadThemeSeed() async {

@@ -147,7 +147,7 @@ class _SplashScreenState extends State<SplashScreen> {
               const SizedBox(height: 16),
               Text('MiFinApp', style: theme.textTheme.headlineMedium?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
-              const Text('Gestor de inventario'),
+              const Text('Controla tus gastos'),
             ],
           ),
         ),
