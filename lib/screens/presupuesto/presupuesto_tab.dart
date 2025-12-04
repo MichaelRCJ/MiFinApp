@@ -458,8 +458,17 @@ class _BudgetTabState extends State<BudgetTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '¿Estás seguro de que quieres guardar este presupuesto?',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              '❌ No se puede agregar este presupuesto',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Saldo insuficiente. Por favor ingrese un ingreso para asignar este presupuesto.',
+              style: const TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 12),
             Container(
@@ -496,7 +505,7 @@ class _BudgetTabState extends State<BudgetTab> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Una vez guardado, este presupuesto se aplicará a todos tus gastos.',
+              '💰 Para poder asignar este presupuesto, primero aumenta tu saldo registrando ingresos.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
@@ -508,11 +517,14 @@ class _BudgetTabState extends State<BudgetTab> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
+              backgroundColor: Colors.green,
               foregroundColor: Colors.white,
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sí, guardar'),
+            onPressed: () {
+              Navigator.pop(context, false); // Cerrar diálogo sin guardar
+              _navigateToIncomes(); // Ir a ingresos para aumentar saldo
+            },
+            child: const Text('Ir a ingresos'),
           ),
         ],
       ),
@@ -533,7 +545,14 @@ class _BudgetTabState extends State<BudgetTab> {
     
     if (monthlyDeposit <= 0) {
       debugPrint('❌ Monthly deposit is <= 0: $monthlyDeposit');
-      _showError('El saldo debe ser mayor a cero. Registra ingresos para aumentar tu saldo.');
+      // Mostrar diálogo de saldo en cero en lugar de un error
+      final result = await _showZeroBalanceDialog(
+        asignacionIntentada: _totalAllocated,
+        categoria: 'presupuesto',
+      );
+      if (result == true) {
+        _navigateToIncomes();
+      }
       return false;
     }
     
@@ -691,18 +710,24 @@ class _BudgetTabState extends State<BudgetTab> {
     
     debugPrint('🔍 Validando actualización automática: $newAmount (total: $newTotal, disponible: $monthlyDeposit)');
     
-    if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
-      // Mostrar diálogo de confirmación para presupuesto extendido
-      final confirmed = await _showBudgetExtensionDialog(category, newAmount, monthlyDeposit);
-      if (confirmed) {
-        _amount[category]!.text = _formatCurrency(newAmount);
-        _presupuestoExtendido[category] = true;
-        debugPrint('✅ Presupuesto extendido confirmado para ${category.name}: $newAmount');
-        return true;
-      } else {
-        debugPrint('❌ Usuario canceló extensión de presupuesto para ${category.name}');
-        return false;
+    if (monthlyDeposit == 0) {
+      // NO mostrar diálogo automáticamente cuando se navega entre pantallas
+      debugPrint('❌ Saldo es cero, pero no mostrar diálogo automáticamente');
+      return false;
+    } else if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
+      // Mostrar diálogo de presupuesto excedido
+      final result = await _showBudgetExceededDialog(
+        presupuesto: monthlyDeposit,
+        gastoActual: currentCategoryAmount,
+        nuevoGasto: newAmount,
+        totalDespues: newTotal,
+        excedente: newTotal - monthlyDeposit,
+        categoria: _getBudgetCategoryName(category),
+      );
+      if (result == true) {
+        _navigateToIncomes();
       }
+      return false;
     } else {
       // Hay saldo disponible, actualizar directamente
       _amount[category]!.text = _formatCurrency(newAmount);
@@ -805,6 +830,186 @@ class _BudgetTabState extends State<BudgetTab> {
     );
     return result ?? false;
   }
+
+  // Mostrar diálogo de presupuesto de categoría excedido
+  Future<bool> _showBudgetExceededDialog({
+    required double presupuesto,
+    required double gastoActual,
+    required double nuevoGasto,
+    required double totalDespues,
+    required double excedente,
+    required String categoria,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_outlined, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('Presupuesto de Categoría Excedido'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'No tienes saldo suficiente para asignar \$${nuevoGasto.toStringAsFixed(2)} a la categoría $categoria.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildInfoRow('Saldo disponible:', '\$${presupuesto.toStringAsFixed(2)}'),
+                  _buildInfoRow('Asignación actual:', '\$${gastoActual.toStringAsFixed(2)}'),
+                  _buildInfoRow('Nueva asignación:', '\$${nuevoGasto.toStringAsFixed(2)}'),
+                  _buildInfoRow('Total después de asignar:', '\$${totalDespues.toStringAsFixed(2)}'),
+                  const Divider(color: Colors.orange),
+                  _buildInfoRow(
+                    'Faltante:', 
+                    '\$${excedente.toStringAsFixed(2)}',
+                    Colors.red,
+                    true,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '¿Deseas registrar ingresos para aumentar tu saldo?',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Registrar ingresos'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  // Mostrar diálogo de saldo en cero
+  Future<bool> _showZeroBalanceDialog({
+    required double asignacionIntentada,
+    required String categoria,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.money_off, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('Saldo en Cero'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'No tienes saldo disponible para asignar \$${asignacionIntentada.toStringAsFixed(2)} a la categoría $categoria.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildInfoRow('Saldo actual:', '\$0.00', Colors.red, true),
+                  _buildInfoRow('Asignación intentada:', '\$${asignacionIntentada.toStringAsFixed(2)}'),
+                  const Divider(color: Colors.red),
+                  _buildInfoRow(
+                    'Necesitas registrar:', 
+                    '\$${asignacionIntentada.toStringAsFixed(2)}',
+                    Colors.red,
+                    true,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Para poder asignar presupuestos, primero debes registrar ingresos.',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Registrar ingresos'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  // Helper para construir filas de información
+  Widget _buildInfoRow(String label, String value, [Color? valueColor, bool isBold = false]) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              fontSize: 14,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              fontSize: 14,
+              color: valueColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showInsufficientBalanceDialog(double requestedAmount, double availableAmount) async {
     final result = await showDialog<bool>(
       context: context,
@@ -822,7 +1027,7 @@ class _BudgetTabState extends State<BudgetTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'No puedes asignar \$${requestedAmount.toStringAsFixed(2)} a esta categoría.',
+              'No tienes saldo suficiente para asignar \$${requestedAmount.toStringAsFixed(2)} a esta categoría.',
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 12),
@@ -873,7 +1078,7 @@ class _BudgetTabState extends State<BudgetTab> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Para aumentar tu saldo, registra un nuevo ingreso.',
+              'Para añadir más saldo, ve a la sección de ingresos.',
               style: TextStyle(fontSize: 14),
             ),
           ],
@@ -1136,12 +1341,31 @@ class _BudgetTabState extends State<BudgetTab> {
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              const Text(
-                                'Para aumentar tu saldo, registra ingresos en la pestaña de Ingresos',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.blue,
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: const Text(
+                                      'Para aumentar tu saldo, registra ingresos en la pestaña de Ingresos',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: _navigateToIncomes,
+                                    icon: const Icon(Icons.add_circle_outline, size: 16),
+                                    label: const Text('Ir a Ingresos'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1541,7 +1765,8 @@ class _BudgetTabState extends State<BudgetTab> {
                     final monthlyDeposit = _monthlyDeposit;
                     
                     if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
-                      return 'Saldo insuficiente. Disponible: \$${monthlyDeposit.toStringAsFixed(2)}';
+                      // No mostrar mensaje de error, el diálogo se manejará en onFieldSubmitted
+                      return null;
                     }
                     
                     return null;
@@ -1585,8 +1810,15 @@ class _BudgetTabState extends State<BudgetTab> {
                       final monthlyDeposit = _monthlyDeposit;
                       
                       if (newTotal > monthlyDeposit && monthlyDeposit > 0) {
-                        // Mostrar diálogo de saldo insuficiente
-                        _showInsufficientBalanceDialog(amount, monthlyDeposit);
+                        // Mostrar diálogo de presupuesto excedido
+                        _showBudgetExceededDialog(
+                          presupuesto: monthlyDeposit,
+                          gastoActual: currentCategoryAmount,
+                          nuevoGasto: amount,
+                          totalDespues: newTotal,
+                          excedente: newTotal - monthlyDeposit,
+                          categoria: _getBudgetCategoryName(category),
+                        );
                         return;
                       }
                     }

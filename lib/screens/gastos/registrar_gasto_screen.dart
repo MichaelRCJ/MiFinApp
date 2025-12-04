@@ -40,14 +40,34 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
     final monto = double.tryParse(_montoCtrl.text.trim()) ?? 0;
+    
+    debugPrint('🔍 DEBUG: Intentando guardar gasto de \$${monto.toStringAsFixed(2)}');
 
     // PRIMERO: Verificar si hay saldo total disponible
     final totalBalanceCheck = await _checkTotalBalance(monto);
+    debugPrint('🔍 DEBUG: totalBalanceCheck = $totalBalanceCheck');
+    
+    // SI HAY PROBLEMAS DE SALDO, mostrar diálogo DESPUÉS de intentar guardar
     if (totalBalanceCheck != null) {
-      final shouldContinue = await _showInsufficientBalanceDialog(totalBalanceCheck);
-      if (shouldContinue != true) {
-        return; // Usuario canceló, no guardar el gasto
+      debugPrint('🔍 DEBUG: Hay problema de saldo');
+      // Verificar si el saldo es cero
+      if (totalBalanceCheck['balance'] == 0.0) {
+        debugPrint('🔍 DEBUG: Saldo es cero, mostrando diálogo...');
+        // Mostrar diálogo de saldo en cero DESPUÉS de intentar
+        await _showZeroBalanceDialog(monto);
+        debugPrint('🔍 DEBUG: Diálogo cerrado, retornando sin guardar');
+        return; // No guardar el gasto
+      } else {
+        debugPrint('🔍 DEBUG: Saldo insuficiente, mostrando diálogo...');
+        // Mostrar diálogo de saldo insuficiente DESPUÉS de intentar
+        final shouldContinue = await _showInsufficientBalanceDialog(totalBalanceCheck);
+        if (shouldContinue != true) {
+          debugPrint('🔍 DEBUG: Usuario canceló, no guardar el gasto');
+          return; // Usuario canceló, no guardar el gasto
+        }
       }
+    } else {
+      debugPrint('🔍 DEBUG: No hay problema de saldo, continuando...');
     }
 
     // SEGUNDO: Verificar si excede el presupuesto de la categoría
@@ -55,8 +75,10 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
 
     // Si excede el presupuesto, mostrar diálogo de confirmación
     if (budgetExceeded != null) {
+      debugPrint('🔍 DEBUG: Presupuesto excedido, mostrando diálogo...');
       final shouldContinue = await _showBudgetExceededDialog(budgetExceeded);
       if (shouldContinue != true) {
+        debugPrint('🔍 DEBUG: Usuario canceló presupuesto excedido, no guardar el gasto');
         return; // Usuario canceló, no guardar el gasto
       }
       
@@ -64,6 +86,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
       await _updateBudgetAutomatically(_categoria, monto);
     }
 
+    debugPrint('🔍 DEBUG: Todas las validaciones pasaron, guardando gasto...');
     final expense = Expense(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       descripcion: _descripcionCtrl.text.trim(),
@@ -72,6 +95,7 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
       categoria: _categoria,
     );
     await expenseStore.addExpense(expense);
+    debugPrint('🔍 DEBUG: Gasto guardado exitosamente');
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -84,8 +108,15 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
       final budgetConfig = await budgetStore.loadConfig();
       
       if (budgetConfig == null) {
-        debugPrint('❌ No budget config found');
-        return null;
+        debugPrint('❌ No budget config found - tratando como saldo cero');
+        // Si no hay configuración, tratar como saldo cero
+        return {
+          'balance': 0.0,
+          'current': 0.0,
+          'newExpense': monto,
+          'total': monto,
+          'shortfall': monto,
+        };
       }
 
       final totalBalance = budgetConfig.monthlyDeposit;
@@ -107,6 +138,18 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
       
       debugPrint('💸 Current spent: $currentSpent, New total: $newTotal, Balance: $totalBalance');
 
+      // Si el saldo es cero, siempre mostrar diálogo
+      if (totalBalance == 0.0) {
+        debugPrint('⚠️ ZERO BALANCE! Showing dialog...');
+        return {
+          'balance': 0.0,
+          'current': currentSpent,
+          'newExpense': monto,
+          'total': newTotal,
+          'shortfall': monto,
+        };
+      }
+      
       if (newTotal > totalBalance) {
         debugPrint('⚠️ INSUFFICIENT BALANCE! Showing dialog...');
         return {
@@ -238,6 +281,99 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar gasto'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Mostrar diálogo de saldo en cero para gastos
+  Future<bool?> _showZeroBalanceDialog(double monto) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.money_off, color: Colors.red[700]),
+            const SizedBox(width: 8),
+            const Text('Saldo en Cero'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '❌ No se puede registrar este gasto',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No tienes ningún ingreso registrado. Por favor ingresa un ingreso para registrar este gasto.',
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red[200]!),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Saldo actual:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text('\$0.00', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Gasto intentado:'),
+                      Text('\$${monto.toStringAsFixed(2)}', style: const TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                  const Divider(color: Colors.red),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Necesitas registrar:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text('\$${monto.toStringAsFixed(2)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '💰 Para poder registrar gastos, primero debes registrar ingresos.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context, false); // Cerrar diálogo sin guardar
+              _navigateToIncomes(); // Ir a ingresos
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ir a ingresos'),
           ),
         ],
       ),
@@ -620,5 +756,15 @@ class _RegistrarGastoScreenState extends State<RegistrarGastoScreen> {
         ),
       ),
     );
+  }
+
+  // Navegar a la pestaña de ingresos
+  void _navigateToIncomes() {
+    debugPrint('🚀 Navegando a ingresos desde gastos...');
+    try {
+      Navigator.of(context).pushNamed('/ingresos');
+    } catch (e) {
+      debugPrint('❌ Error al navegar a ingresos: $e');
+    }
   }
 }
